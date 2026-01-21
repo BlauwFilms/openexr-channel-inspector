@@ -1,0 +1,99 @@
+<!--
+  OpenEXR Inspector - Webflow Loader
+  Blauw Films (www.blauwfilms.com)
+  
+  Instructions:
+  1. Upload 'openexr-inspector-full.html' to your GitHub repository
+  2. Get the raw URL (click "Raw" button on GitHub, or use jsDelivr CDN)
+  3. Update the GITHUB_URL below with your URL
+  4. Paste this entire code into a Webflow Embed/Code Block
+-->
+
+<div id="exr-inspector-container">
+  <div style="font-family: 'Roboto', sans-serif; padding: 40px; text-align: center; background: #f9f9f9;">
+    <div style="background: #ececec; border: 1px solid #dadada; padding: 32px; border-radius: 2px; max-width: 600px; margin: 0 auto;">
+      <div style="width: 40px; height: 40px; border: 3px solid #e5e5e5; border-top-color: #1451eb; border-radius: 50%; animation: exr-load-spin 0.8s linear infinite; margin: 0 auto 16px;"></div>
+      <p style="font-size: 14px; color: #666;">Loading OpenEXR Inspector...</p>
+    </div>
+  </div>
+  <style>@keyframes exr-load-spin { to { transform: rotate(360deg); } }</style>
+</div>
+
+<script>
+(function() {
+  // ================================================================
+  // CONFIGURATION - Update this URL to your GitHub raw file URL
+  // ================================================================
+  
+  // Option 1: GitHub raw URL (may have CORS issues, use jsDelivr instead)
+  // const GITHUB_URL = 'https://raw.githubusercontent.com/BlauwFilms/openexr-channel-inspector/main/openexr-inspector-full.html';
+  
+  // Option 2: jsDelivr CDN (recommended - no CORS issues)
+  // const GITHUB_URL = 'https://cdn.jsdelivr.net/gh/BlauwFilms/openexr-channel-inspector@main/openexr-inspector-full.html';
+  
+  // Option 3: GitHub Pages
+  // const GITHUB_URL = 'https://BlauwFilms.github.io/openexr-channel-inspector/openexr-inspector-full.html';
+  
+  // EXAMPLE (replace with your actual URL):
+  const GITHUB_URL = 'https://cdn.jsdelivr.net/gh/blauwfilms/tools@main/openexr-inspector-full.html';
+  
+  // ================================================================
+  
+  const container = document.getElementById('exr-inspector-container');
+  
+  fetch(GITHUB_URL)
+    .then(response => {
+      if (!response.ok) throw new Error('Failed to load inspector: ' + response.status);
+      return response.text();
+    })
+    .then(html => {
+      // Parse the HTML and extract content
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(html, 'text/html');
+      
+      // Get style and script content
+      const style = doc.querySelector('style');
+      const script = doc.querySelector('script');
+      const body = doc.body;
+      
+      // Remove script from body to prevent double execution
+      if (body.querySelector('script')) {
+        body.querySelector('script').remove();
+      }
+      
+      // Inject styles
+      if (style) {
+        const styleEl = document.createElement('style');
+        styleEl.textContent = style.textContent;
+        document.head.appendChild(styleEl);
+      }
+      
+      // Inject HTML
+      container.innerHTML = body.innerHTML;
+      
+      // Execute script
+      if (script) {
+        const scriptEl = document.createElement('script');
+        scriptEl.textContent = script.textContent;
+        document.body.appendChild(scriptEl);
+      }
+    })
+    .catch(error => {
+      container.innerHTML = `
+        <div style="font-family: 'Roboto', sans-serif; padding: 40px; background: #f9f9f9;">
+          <div style="background: #fef2f2; border: 1px solid #fca5a5; padding: 24px; border-radius: 2px; max-width: 600px; margin: 0 auto;">
+            <h4 style="color: #b91c1c; margin: 0 0 12px 0; font-weight: 500;">Failed to Load OpenEXR Inspector</h4>
+            <p style="color: #7f1d1d; font-size: 14px; margin: 0 0 16px 0;">${error.message}</p>
+            <p style="color: #7f1d1d; font-size: 12px; margin: 0;">
+              Please check:<br>
+              • The GitHub URL is correct<br>
+              • The file exists and is publicly accessible<br>
+              • CORS is enabled (use jsDelivr CDN)
+            </p>
+          </div>
+        </div>
+      `;
+      console.error('OpenEXR Inspector load error:', error);
+    });
+})();
+</script>

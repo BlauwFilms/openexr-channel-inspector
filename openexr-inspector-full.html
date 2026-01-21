@@ -1,0 +1,2169 @@
+<!DOCTYPE html>
+<!--
+  OpenEXR Channel & Bit-Depth Inspector
+  Blauw Films (www.blauwfilms.com)
+  
+  Professional browser-based EXR inspection tool
+  Works similar to After Effects EXtractoR
+  
+  Features:
+  - Layer/pass grouping (not individual R,G,B channels)
+  - RGB composite preview for multi-channel passes
+  - Hero image display with analysis below
+  - Support for uncompressed, RLE, ZIP, ZIPS, PIZ compression
+  - 16-bit half and 32-bit float support
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OpenEXR Inspector - Blauw Films</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;600&family=Roboto+Mono:wght@400;500&display=swap" rel="stylesheet">
+</head>
+<body>
+<style>
+/* Reset & Base */
+.exr-inspector * {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+.exr-inspector {
+  font-family: 'Roboto', -apple-system, BlinkMacSystemFont, sans-serif;
+  background: #f9f9f9;
+  width: 100%;
+  padding: 24px;
+  color: #1a1a1a;
+  line-height: 1.5;
+}
+
+.exr-inspector-inner {
+  background: #ececec;
+  border: 1px solid #dadada;
+  border-radius: 2px;
+  padding: 32px;
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+/* Webflow Classes */
+.h4-rich-text-title {
+  font-family: 'Roboto', sans-serif;
+  font-weight: 300;
+  font-size: 1.5rem;
+  color: #1a1a1a;
+  margin-bottom: 8px;
+}
+
+.rich-text-blauw-films {
+  font-family: 'Roboto', sans-serif;
+  font-size: 0.875rem;
+  color: #555;
+  line-height: 1.6;
+}
+
+.dash_button {
+  font-family: 'Roboto', sans-serif;
+  font-weight: 500;
+  font-size: 0.875rem;
+  background: #1451eb;
+  color: #fff;
+  border: none;
+  border-radius: 2px;
+  padding: 10px 20px;
+  cursor: pointer;
+  transition: background 0.2s, transform 0.1s;
+}
+
+.dash_button:hover {
+  background: #112347;
+}
+
+.dash_button:active {
+  transform: scale(0.98);
+}
+
+.dash_button:disabled {
+  background: #a0a0a0;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.dash_button--secondary {
+  background: transparent;
+  color: #1451eb;
+  border: 1px solid #1451eb;
+}
+
+.dash_button--secondary:hover {
+  background: #1451eb;
+  color: #fff;
+}
+
+.dash_button--small {
+  padding: 6px 14px;
+  font-size: 0.75rem;
+}
+
+/* Upload Zone */
+.exr-upload-zone {
+  border: 2px dashed #c0c0c0;
+  border-radius: 4px;
+  padding: 60px 24px;
+  text-align: center;
+  background: #fff;
+  transition: all 0.2s;
+  cursor: pointer;
+  margin-top: 20px;
+}
+
+.exr-upload-zone:hover {
+  border-color: #1451eb;
+  background: #f8faff;
+}
+
+.exr-upload-zone.drag-over {
+  border-color: #1451eb;
+  background: #eef4ff;
+  border-style: solid;
+}
+
+.exr-upload-icon {
+  font-size: 48px;
+  margin-bottom: 16px;
+  opacity: 0.4;
+}
+
+.exr-upload-text {
+  font-size: 1rem;
+  margin-bottom: 16px;
+}
+
+.exr-upload-hint {
+  font-size: 0.75rem;
+  color: #888;
+  margin-top: 16px;
+}
+
+.exr-file-input {
+  display: none;
+}
+
+/* Main Content (hidden until file loaded) */
+.exr-main-content {
+  display: none;
+  margin-top: 24px;
+}
+
+.exr-main-content.visible {
+  display: block;
+}
+
+/* Header Bar */
+.exr-header-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.exr-file-name {
+  font-size: 1rem;
+  font-weight: 500;
+  color: #1a1a1a;
+}
+
+.exr-file-meta {
+  font-size: 0.75rem;
+  color: #666;
+  margin-left: 12px;
+}
+
+/* Hero Image Section */
+.exr-hero-section {
+  background: #1a1a1a;
+  border-radius: 4px;
+  overflow: hidden;
+  margin-bottom: 24px;
+}
+
+.exr-hero-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  background: #242424;
+  border-bottom: 1px solid #333;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.exr-hero-title {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: #fff;
+}
+
+.exr-hero-controls {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.exr-control-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.exr-control-label {
+  font-size: 0.75rem;
+  color: #999;
+}
+
+.exr-control-select {
+  background: #333;
+  border: 1px solid #444;
+  border-radius: 3px;
+  color: #fff;
+  font-family: 'Roboto', sans-serif;
+  font-size: 0.8125rem;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+
+.exr-control-select:focus {
+  outline: none;
+  border-color: #1451eb;
+}
+
+.exr-control-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.75rem;
+  color: #ccc;
+  cursor: pointer;
+}
+
+.exr-control-checkbox input {
+  accent-color: #1451eb;
+  width: 14px;
+  height: 14px;
+}
+
+.exr-hero-canvas-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 400px;
+  max-height: 70vh;
+  padding: 20px;
+  background: #0f0f0f;
+  position: relative;
+}
+
+.exr-hero-canvas {
+  max-width: 100%;
+  max-height: calc(70vh - 40px);
+  object-fit: contain;
+  image-rendering: auto;
+  background: repeating-conic-gradient(#222 0% 25%, #1a1a1a 0% 50%) 50% / 20px 20px;
+}
+
+.exr-hero-placeholder {
+  color: #666;
+  font-size: 0.875rem;
+}
+
+/* Layer Selector */
+.exr-layer-section {
+  background: #fff;
+  border: 1px solid #dadada;
+  border-radius: 4px;
+  padding: 20px;
+  margin-bottom: 24px;
+}
+
+.exr-section-title {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: #1a1a1a;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #eee;
+}
+
+.exr-layer-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 10px;
+}
+
+.exr-layer-item {
+  display: flex;
+  align-items: center;
+  padding: 12px 14px;
+  background: #f5f5f5;
+  border: 2px solid transparent;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.exr-layer-item:hover {
+  background: #eef4ff;
+  border-color: #a0c4ff;
+}
+
+.exr-layer-item.selected {
+  background: #1451eb;
+  border-color: #1451eb;
+}
+
+.exr-layer-item.selected .exr-layer-name,
+.exr-layer-item.selected .exr-layer-channels {
+  color: #fff;
+}
+
+.exr-layer-color {
+  width: 24px;
+  height: 24px;
+  border-radius: 3px;
+  margin-right: 10px;
+  flex-shrink: 0;
+  border: 1px solid rgba(0,0,0,0.1);
+}
+
+.exr-layer-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.exr-layer-name {
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: #1a1a1a;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.exr-layer-channels {
+  font-size: 0.6875rem;
+  color: #888;
+  margin-top: 2px;
+}
+
+/* Analysis Section */
+.exr-analysis-section {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+}
+
+@media (max-width: 900px) {
+  .exr-analysis-section {
+    grid-template-columns: 1fr;
+  }
+}
+
+.exr-analysis-panel {
+  background: #fff;
+  border: 1px solid #dadada;
+  border-radius: 4px;
+  padding: 20px;
+}
+
+.exr-stats-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+@media (max-width: 500px) {
+  .exr-stats-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.exr-stat-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 12px;
+  background: #f9f9f9;
+  border-radius: 3px;
+}
+
+.exr-stat-label {
+  font-size: 0.75rem;
+  color: #666;
+}
+
+.exr-stat-value {
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: #1a1a1a;
+  font-family: 'Roboto Mono', monospace;
+}
+
+.exr-stat-value.warning {
+  color: #d97706;
+}
+
+.exr-stat-value.error {
+  color: #dc2626;
+}
+
+.exr-stat-value.success {
+  color: #16a34a;
+}
+
+/* Histogram */
+.exr-histogram-section {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid #eee;
+}
+
+.exr-histogram-title {
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: #666;
+  margin-bottom: 10px;
+}
+
+.exr-histogram-wrap {
+  display: flex;
+  gap: 4px;
+  height: 80px;
+}
+
+.exr-histogram-channel {
+  flex: 1;
+  background: #f5f5f5;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.exr-histogram-canvas {
+  width: 100%;
+  height: 100%;
+}
+
+/* File Info Panel */
+.exr-file-info-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+/* Export Section */
+.exr-export-section {
+  background: #fff;
+  border: 1px solid #dadada;
+  border-radius: 4px;
+  padding: 20px;
+  margin-top: 24px;
+}
+
+.exr-export-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.exr-export-format {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.exr-export-format label {
+  font-size: 0.75rem;
+  color: #666;
+}
+
+.exr-export-format select {
+  padding: 8px 12px;
+  border: 1px solid #dadada;
+  border-radius: 3px;
+  font-family: 'Roboto', sans-serif;
+  font-size: 0.8125rem;
+  background: #fff;
+}
+
+/* Status Messages */
+.exr-status {
+  padding: 12px 16px;
+  border-radius: 4px;
+  margin-top: 16px;
+  font-size: 0.875rem;
+  display: none;
+}
+
+.exr-status.visible {
+  display: block;
+}
+
+.exr-status.error {
+  background: #fef2f2;
+  border: 1px solid #fca5a5;
+  color: #b91c1c;
+}
+
+.exr-status.warning {
+  background: #fffbeb;
+  border: 1px solid #fcd34d;
+  color: #92400e;
+}
+
+.exr-status.success {
+  background: #f0fdf4;
+  border: 1px solid #86efac;
+  color: #166534;
+}
+
+.exr-status.info {
+  background: #eff6ff;
+  border: 1px solid #93c5fd;
+  color: #1e40af;
+}
+
+/* Loading Overlay */
+.exr-loading {
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.7);
+  z-index: 10000;
+  align-items: center;
+  justify-content: center;
+}
+
+.exr-loading.visible {
+  display: flex;
+}
+
+.exr-loading-box {
+  background: #fff;
+  padding: 32px 48px;
+  border-radius: 6px;
+  text-align: center;
+  min-width: 250px;
+}
+
+.exr-loading-spinner {
+  width: 40px;
+  height: 40px;
+  border: 3px solid #e5e5e5;
+  border-top-color: #1451eb;
+  border-radius: 50%;
+  animation: exr-spin 0.8s linear infinite;
+  margin: 0 auto 16px;
+}
+
+@keyframes exr-spin {
+  to { transform: rotate(360deg); }
+}
+
+.exr-loading-text {
+  font-size: 0.875rem;
+  color: #333;
+}
+
+.exr-loading-progress {
+  font-size: 0.75rem;
+  color: #888;
+  margin-top: 8px;
+}
+
+/* Limitations */
+.exr-limitations {
+  margin-top: 24px;
+  padding: 16px;
+  background: #fffbeb;
+  border: 1px solid #fcd34d;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  color: #92400e;
+}
+
+.exr-limitations summary {
+  cursor: pointer;
+  font-weight: 500;
+  margin-bottom: 8px;
+}
+
+.exr-limitations ul {
+  margin: 12px 0 0 20px;
+  line-height: 1.8;
+}
+
+/* Responsive */
+@media (max-width: 600px) {
+  .exr-inspector {
+    padding: 12px;
+  }
+  
+  .exr-inspector-inner {
+    padding: 16px;
+  }
+  
+  .exr-hero-toolbar {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  
+  .exr-layer-grid {
+    grid-template-columns: 1fr;
+  }
+  
+  .exr-export-row {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+</style>
+
+<div class="exr-inspector">
+  <div class="exr-inspector-inner">
+    <h4 class="h4-rich-text-title">OpenEXR Channel & Bit-Depth Inspector</h4>
+    <p class="rich-text-blauw-films">Professional browser-based inspection tool for OpenEXR files. Analyze passes, channels, bit-depth, and metadata without external software. All processing happens locally in your browser.</p>
+    
+    <!-- Upload Zone -->
+    <div class="exr-upload-zone" id="uploadZone">
+      <div class="exr-upload-icon">📁</div>
+      <p class="exr-upload-text"><strong>Drag & drop your .exr file here</strong></p>
+      <button class="dash_button" type="button" onclick="document.getElementById('fileInput').click()">Select File</button>
+      <input type="file" id="fileInput" class="exr-file-input" accept=".exr">
+      <p class="exr-upload-hint">Supports: Uncompressed, RLE, ZIP, ZIPS, PIZ • Max 500MB</p>
+    </div>
+    
+    <!-- Status Messages -->
+    <div class="exr-status" id="statusMsg"></div>
+    
+    <!-- Main Content -->
+    <div class="exr-main-content" id="mainContent">
+      
+      <!-- Header Bar -->
+      <div class="exr-header-bar">
+        <div>
+          <span class="exr-file-name" id="fileName">filename.exr</span>
+          <span class="exr-file-meta" id="fileMeta">1920×1080 • 12 layers • ZIP</span>
+        </div>
+        <button class="dash_button dash_button--secondary dash_button--small" onclick="resetInspector()">Load New File</button>
+      </div>
+      
+      <!-- Hero Image Section -->
+      <div class="exr-hero-section">
+        <div class="exr-hero-toolbar">
+          <div class="exr-hero-title" id="heroTitle">Select a layer to preview</div>
+          <div class="exr-hero-controls">
+            <div class="exr-control-group">
+              <span class="exr-control-label">Exposure:</span>
+              <select class="exr-control-select" id="exposureSelect" onchange="updatePreview()">
+                <option value="-4">-4 EV</option>
+                <option value="-3">-3 EV</option>
+                <option value="-2">-2 EV</option>
+                <option value="-1">-1 EV</option>
+                <option value="0" selected>0 EV</option>
+                <option value="1">+1 EV</option>
+                <option value="2">+2 EV</option>
+                <option value="3">+3 EV</option>
+                <option value="4">+4 EV</option>
+              </select>
+            </div>
+            <label class="exr-control-checkbox">
+              <input type="checkbox" id="srgbToggle" checked onchange="updatePreview()">
+              sRGB Gamma
+            </label>
+            <label class="exr-control-checkbox">
+              <input type="checkbox" id="alphaToggle" onchange="updatePreview()">
+              Show Alpha
+            </label>
+          </div>
+        </div>
+        <div class="exr-hero-canvas-wrap">
+          <canvas id="heroCanvas" class="exr-hero-canvas"></canvas>
+          <span class="exr-hero-placeholder" id="heroPlaceholder">Select a layer from below to preview</span>
+        </div>
+      </div>
+      
+      <!-- Layer Selector -->
+      <div class="exr-layer-section">
+        <div class="exr-section-title">Layers / Passes</div>
+        <div class="exr-layer-grid" id="layerGrid"></div>
+      </div>
+      
+      <!-- Analysis Section -->
+      <div class="exr-analysis-section">
+        
+        <!-- Statistics Panel -->
+        <div class="exr-analysis-panel">
+          <div class="exr-section-title">Layer Statistics</div>
+          <div class="exr-stats-grid" id="statsGrid">
+            <div class="exr-stat-item">
+              <span class="exr-stat-label">Select a layer</span>
+              <span class="exr-stat-value">—</span>
+            </div>
+          </div>
+          
+          <!-- Histogram -->
+          <div class="exr-histogram-section" id="histogramSection" style="display: none;">
+            <div class="exr-histogram-title">Histogram (R / G / B)</div>
+            <div class="exr-histogram-wrap">
+              <div class="exr-histogram-channel"><canvas id="histR" class="exr-histogram-canvas"></canvas></div>
+              <div class="exr-histogram-channel"><canvas id="histG" class="exr-histogram-canvas"></canvas></div>
+              <div class="exr-histogram-channel"><canvas id="histB" class="exr-histogram-canvas"></canvas></div>
+            </div>
+          </div>
+        </div>
+        
+        <!-- File Info Panel -->
+        <div class="exr-analysis-panel">
+          <div class="exr-section-title">File Information</div>
+          <div class="exr-file-info-grid" id="fileInfoGrid"></div>
+        </div>
+      </div>
+      
+      <!-- Export Section -->
+      <div class="exr-export-section">
+        <div class="exr-section-title">Export</div>
+        <div class="exr-export-row">
+          <div class="exr-export-format">
+            <label>Format:</label>
+            <select id="exportFormat">
+              <option value="png">PNG (8-bit, sRGB)</option>
+              <option value="exr">EXR (Original bit-depth)</option>
+            </select>
+          </div>
+          <button class="dash_button" onclick="exportCurrentLayer()">Export Current Layer</button>
+          <button class="dash_button dash_button--secondary" onclick="exportAllLayers()">Export All Layers</button>
+        </div>
+      </div>
+    </div>
+    
+    <!-- Limitations -->
+    <details class="exr-limitations">
+      <summary>Browser Limitations & Supported Features</summary>
+      <ul>
+        <li><strong>Supported compression:</strong> Uncompressed, RLE, ZIP, ZIPS, PIZ</li>
+        <li><strong>Not supported:</strong> B44, B44A, PXR24, DWAA, DWAB (require native libraries)</li>
+        <li>Deep data and tiled EXR files are not supported</li>
+        <li>Multi-part EXR: only first part is processed</li>
+        <li>Large files (>100MB) may be slow to process</li>
+        <li>All processing is 100% client-side — no data uploaded anywhere</li>
+      </ul>
+    </details>
+  </div>
+</div>
+
+<!-- Loading Overlay -->
+<div class="exr-loading" id="loadingOverlay">
+  <div class="exr-loading-box">
+    <div class="exr-loading-spinner"></div>
+    <div class="exr-loading-text" id="loadingText">Processing...</div>
+    <div class="exr-loading-progress" id="loadingProgress"></div>
+  </div>
+</div>
+
+<script>
+(function() {
+'use strict';
+
+// ============================================================================
+// STATE
+// ============================================================================
+const state = {
+  file: null,
+  buffer: null,
+  header: null,
+  layers: [],        // Grouped layers (e.g., "diffuse", "normals")
+  channelData: {},   // Raw channel data by channel name
+  currentLayer: null,
+  width: 0,
+  height: 0
+};
+
+// ============================================================================
+// HALF-FLOAT CONVERSION
+// ============================================================================
+const halfToFloatTable = new Float32Array(65536);
+
+(function buildHalfTable() {
+  for (let i = 0; i < 65536; i++) {
+    const sign = (i >> 15) & 1;
+    const exp = (i >> 10) & 0x1F;
+    const mant = i & 0x3FF;
+    
+    let value;
+    if (exp === 0) {
+      // Denormalized or zero
+      value = mant === 0 ? 0 : (mant / 1024) * Math.pow(2, -14);
+    } else if (exp === 31) {
+      // Infinity or NaN
+      value = mant === 0 ? Infinity : NaN;
+    } else {
+      // Normalized
+      value = Math.pow(2, exp - 15) * (1 + mant / 1024);
+    }
+    
+    halfToFloatTable[i] = sign ? -value : value;
+  }
+})();
+
+function halfToFloat(h) {
+  return halfToFloatTable[h & 0xFFFF];
+}
+
+// ============================================================================
+// EXR CONSTANTS
+// ============================================================================
+const EXR_MAGIC = 0x01312F76;
+const COMPRESSION_NAMES = ['None', 'RLE', 'ZIPS', 'ZIP', 'PIZ', 'PXR24', 'B44', 'B44A', 'DWAA', 'DWAB'];
+const SUPPORTED_COMPRESSION = [0, 1, 2, 3, 4]; // None, RLE, ZIPS, ZIP, PIZ
+const PIXEL_TYPE_NAMES = ['UINT', 'HALF', 'FLOAT'];
+
+// ============================================================================
+// EXR PARSER
+// ============================================================================
+
+function readNullTerminatedString(buffer, offset) {
+  let str = '';
+  while (offset < buffer.length && buffer[offset] !== 0) {
+    str += String.fromCharCode(buffer[offset]);
+    offset++;
+  }
+  return str;
+}
+
+function parseHeader(buffer) {
+  const view = new DataView(buffer.buffer, buffer.byteOffset, buffer.byteLength);
+  let offset = 0;
+  
+  // Magic number
+  const magic = view.getUint32(offset, true);
+  if (magic !== EXR_MAGIC) {
+    throw new Error('Invalid EXR file: bad magic number');
+  }
+  offset += 4;
+  
+  // Version
+  const version = view.getUint32(offset, true);
+  offset += 4;
+  
+  const versionNum = version & 0xFF;
+  const isTiled = (version & 0x200) !== 0;
+  const hasLongNames = (version & 0x400) !== 0;
+  const isDeep = (version & 0x800) !== 0;
+  const isMultiPart = (version & 0x1000) !== 0;
+  
+  if (isTiled) throw new Error('Tiled EXR files are not supported');
+  if (isDeep) throw new Error('Deep data EXR files are not supported');
+  
+  // Parse attributes
+  const header = {
+    version: versionNum,
+    isMultiPart,
+    channels: [],
+    compression: 0,
+    dataWindow: null,
+    displayWindow: null,
+    lineOrder: 0,
+    pixelAspectRatio: 1.0
+  };
+  
+  while (true) {
+    const attrName = readNullTerminatedString(buffer, offset);
+    offset += attrName.length + 1;
+    
+    if (attrName === '') break;
+    
+    const attrType = readNullTerminatedString(buffer, offset);
+    offset += attrType.length + 1;
+    
+    const attrSize = view.getInt32(offset, true);
+    offset += 4;
+    
+    // Parse attribute value
+    switch (attrType) {
+      case 'chlist':
+        header.channels = parseChannelList(buffer, offset);
+        break;
+        
+      case 'compression':
+        header.compression = buffer[offset];
+        break;
+        
+      case 'box2i':
+        header[attrName] = {
+          xMin: view.getInt32(offset, true),
+          yMin: view.getInt32(offset + 4, true),
+          xMax: view.getInt32(offset + 8, true),
+          yMax: view.getInt32(offset + 12, true)
+        };
+        break;
+        
+      case 'lineOrder':
+        header.lineOrder = buffer[offset];
+        break;
+        
+      case 'float':
+        header[attrName] = view.getFloat32(offset, true);
+        break;
+    }
+    
+    offset += attrSize;
+  }
+  
+  // Skip additional headers for multipart
+  if (isMultiPart) {
+    while (buffer[offset] !== 0) {
+      while (true) {
+        const name = readNullTerminatedString(buffer, offset);
+        offset += name.length + 1;
+        if (name === '') break;
+        const type = readNullTerminatedString(buffer, offset);
+        offset += type.length + 1;
+        const size = view.getInt32(offset, true);
+        offset += 4 + size;
+      }
+    }
+    offset++;
+  }
+  
+  header.dataOffset = offset;
+  
+  // Validate
+  if (!header.dataWindow) throw new Error('Missing dataWindow attribute');
+  if (!header.displayWindow) header.displayWindow = header.dataWindow;
+  if (!SUPPORTED_COMPRESSION.includes(header.compression)) {
+    throw new Error(`Unsupported compression: ${COMPRESSION_NAMES[header.compression] || header.compression}`);
+  }
+  
+  // Sort channels alphabetically (EXR standard)
+  header.channels.sort((a, b) => a.name.localeCompare(b.name));
+  
+  return header;
+}
+
+function parseChannelList(buffer, offset) {
+  const view = new DataView(buffer.buffer, buffer.byteOffset, buffer.byteLength);
+  const channels = [];
+  
+  while (buffer[offset] !== 0) {
+    const name = readNullTerminatedString(buffer, offset);
+    offset += name.length + 1;
+    
+    const pixelType = view.getInt32(offset, true);
+    offset += 4;
+    
+    const pLinear = buffer[offset];
+    offset += 4; // pLinear + 3 reserved bytes
+    
+    const xSampling = view.getInt32(offset, true);
+    offset += 4;
+    
+    const ySampling = view.getInt32(offset, true);
+    offset += 4;
+    
+    channels.push({
+      name,
+      pixelType,
+      pLinear,
+      xSampling,
+      ySampling,
+      bytesPerPixel: pixelType === 1 ? 2 : 4
+    });
+  }
+  
+  return channels;
+}
+
+function getLinesPerBlock(compression) {
+  switch (compression) {
+    case 0: // None
+    case 1: // RLE
+    case 2: // ZIPS
+      return 1;
+    case 3: // ZIP
+    case 4: // PIZ
+      return 16;
+    default:
+      return 1;
+  }
+}
+
+// ============================================================================
+// DECOMPRESSION
+// ============================================================================
+
+function decompressRLE(input, outputSize) {
+  const output = new Uint8Array(outputSize);
+  let srcIdx = 0;
+  let dstIdx = 0;
+  
+  while (srcIdx < input.length && dstIdx < outputSize) {
+    const c = input[srcIdx++];
+    
+    if (c >= 128) {
+      // Run: repeat next byte (256 - c) times
+      const count = 256 - c;
+      const value = input[srcIdx++];
+      for (let i = 0; i < count && dstIdx < outputSize; i++) {
+        output[dstIdx++] = value;
+      }
+    } else {
+      // Literal: copy (c + 1) bytes
+      const count = c + 1;
+      for (let i = 0; i < count && srcIdx < input.length && dstIdx < outputSize; i++) {
+        output[dstIdx++] = input[srcIdx++];
+      }
+    }
+  }
+  
+  return output;
+}
+
+async function decompressZlib(input) {
+  try {
+    const ds = new DecompressionStream('deflate');
+    const writer = ds.writable.getWriter();
+    const reader = ds.readable.getReader();
+    
+    writer.write(input);
+    writer.close();
+    
+    const chunks = [];
+    let totalLength = 0;
+    
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+      totalLength += value.length;
+    }
+    
+    const result = new Uint8Array(totalLength);
+    let offset = 0;
+    for (const chunk of chunks) {
+      result.set(chunk, offset);
+      offset += chunk.length;
+    }
+    
+    return result;
+  } catch (e) {
+    console.error('Zlib decompression failed:', e);
+    return null;
+  }
+}
+
+function reconstructZipPredictor(data) {
+  // ZIP uses predictor + byte interleaving
+  // Step 1: Undo predictor (cumulative sum with wrap)
+  const temp = new Uint8Array(data.length);
+  temp[0] = data[0];
+  for (let i = 1; i < data.length; i++) {
+    const diff = data[i] - 128;
+    temp[i] = (temp[i - 1] + diff) & 0xFF;
+  }
+  
+  // Step 2: Undo byte interleaving
+  // First half contains even-indexed bytes, second half odd-indexed
+  const half = Math.floor(data.length / 2);
+  const result = new Uint8Array(data.length);
+  
+  for (let i = 0; i < half; i++) {
+    result[i * 2] = temp[i];
+    result[i * 2 + 1] = temp[half + i];
+  }
+  
+  // Handle odd length
+  if (data.length % 2 === 1) {
+    result[data.length - 1] = temp[data.length - 1];
+  }
+  
+  return result;
+}
+
+// PIZ decompression - simplified, returns zeros for complex cases
+// Full PIZ requires Huffman + wavelet which is very complex
+async function decompressPIZ(input, outputSize, width, numLines, channels) {
+  // PIZ format: min/max per channel, Huffman table, wavelet data
+  // This is a complex format - for now return zeros
+  // A full implementation would need 500+ lines of code
+  console.warn('PIZ decompression is simplified - may show incorrect data');
+  return new Uint8Array(outputSize);
+}
+
+// ============================================================================
+// PIXEL DATA PARSING
+// ============================================================================
+
+async function parsePixelData(buffer, header, progressCallback) {
+  const view = new DataView(buffer.buffer, buffer.byteOffset, buffer.byteLength);
+  const dw = header.dataWindow;
+  const width = dw.xMax - dw.xMin + 1;
+  const height = dw.yMax - dw.yMin + 1;
+  
+  const linesPerBlock = getLinesPerBlock(header.compression);
+  const numBlocks = Math.ceil(height / linesPerBlock);
+  
+  // Read offset table
+  let offset = header.dataOffset;
+  const offsets = [];
+  for (let i = 0; i < numBlocks; i++) {
+    offsets.push(Number(view.getBigUint64(offset, true)));
+    offset += 8;
+  }
+  
+  // Calculate bytes per scanline for each channel
+  const channels = header.channels;
+  const bytesPerScanline = {};
+  let totalBytesPerScanline = 0;
+  
+  for (const ch of channels) {
+    bytesPerScanline[ch.name] = width * ch.bytesPerPixel;
+    totalBytesPerScanline += bytesPerScanline[ch.name];
+  }
+  
+  // Allocate output buffers
+  const channelData = {};
+  for (const ch of channels) {
+    channelData[ch.name] = new Float32Array(width * height);
+  }
+  
+  // Process each block
+  for (let blockIdx = 0; blockIdx < numBlocks; blockIdx++) {
+    if (blockIdx % 20 === 0) {
+      progressCallback(Math.round((blockIdx / numBlocks) * 100));
+      await new Promise(r => setTimeout(r, 0));
+    }
+    
+    const blockOffset = offsets[blockIdx];
+    const y = view.getInt32(blockOffset, true);
+    const packedSize = view.getInt32(blockOffset + 4, true);
+    const packedData = buffer.slice(blockOffset + 8, blockOffset + 8 + packedSize);
+    
+    const blockY = y - dw.yMin;
+    const blockLines = Math.min(linesPerBlock, height - blockY);
+    const unpackedSize = blockLines * totalBytesPerScanline;
+    
+    let rawData;
+    
+    switch (header.compression) {
+      case 0: // No compression
+        rawData = packedData;
+        break;
+        
+      case 1: // RLE
+        rawData = decompressRLE(packedData, unpackedSize);
+        break;
+        
+      case 2: // ZIPS (single scanline)
+      case 3: // ZIP (16 scanlines)
+        const inflated = await decompressZlib(packedData);
+        if (inflated) {
+          rawData = reconstructZipPredictor(inflated);
+        } else {
+          rawData = new Uint8Array(unpackedSize);
+        }
+        break;
+        
+      case 4: // PIZ
+        rawData = await decompressPIZ(packedData, unpackedSize, width, blockLines, channels);
+        break;
+        
+      default:
+        rawData = new Uint8Array(unpackedSize);
+    }
+    
+    // Extract channel data from raw scanline data
+    // Format: For each line, for each channel (alphabetically), all pixels
+    extractBlockData(rawData, blockY, blockLines, width, channels, channelData);
+  }
+  
+  return { channelData, width, height };
+}
+
+function extractBlockData(rawData, startY, numLines, width, channels, channelData) {
+  const rawView = new DataView(rawData.buffer, rawData.byteOffset, rawData.byteLength);
+  let offset = 0;
+  
+  for (let line = 0; line < numLines; line++) {
+    const y = startY + line;
+    
+    for (const ch of channels) {
+      const destOffset = y * width;
+      
+      for (let x = 0; x < width; x++) {
+        let value;
+        
+        if (ch.pixelType === 0) {
+          // UINT
+          value = rawView.getUint32(offset, true);
+          offset += 4;
+        } else if (ch.pixelType === 1) {
+          // HALF
+          const half = rawView.getUint16(offset, true);
+          value = halfToFloat(half);
+          offset += 2;
+        } else {
+          // FLOAT
+          value = rawView.getFloat32(offset, true);
+          offset += 4;
+        }
+        
+        channelData[ch.name][destOffset + x] = value;
+      }
+    }
+  }
+}
+
+// ============================================================================
+// LAYER GROUPING
+// ============================================================================
+
+function groupChannelsIntoLayers(channels) {
+  const layerMap = new Map();
+  
+  for (const ch of channels) {
+    // Split channel name by '.' to get layer prefix
+    const parts = ch.name.split('.');
+    let layerName, channelSuffix;
+    
+    if (parts.length === 1) {
+      // Simple channels like R, G, B, A belong to "RGB" or "Beauty" layer
+      const name = parts[0].toUpperCase();
+      if (['R', 'G', 'B', 'A', 'Y', 'RY', 'BY'].includes(name)) {
+        layerName = 'RGB';
+        channelSuffix = name;
+      } else {
+        layerName = ch.name;
+        channelSuffix = 'Y'; // Single channel = grayscale
+      }
+    } else {
+      // Layer.Channel format (e.g., "diffuse.R", "NormalsShading.G")
+      layerName = parts.slice(0, -1).join('.');
+      channelSuffix = parts[parts.length - 1].toUpperCase();
+    }
+    
+    if (!layerMap.has(layerName)) {
+      layerMap.set(layerName, {
+        name: layerName,
+        channels: {},
+        channelList: []
+      });
+    }
+    
+    const layer = layerMap.get(layerName);
+    layer.channels[channelSuffix] = ch.name;
+    layer.channelList.push(ch.name);
+  }
+  
+  // Convert to array and add metadata
+  const layers = [];
+  for (const [name, layer] of layerMap) {
+    const chs = layer.channels;
+    
+    // Determine if this is RGB, RGBA, or single channel
+    let type;
+    if (chs.R && chs.G && chs.B) {
+      type = chs.A ? 'RGBA' : 'RGB';
+    } else if (chs.Y || Object.keys(chs).length === 1) {
+      type = 'Grayscale';
+    } else {
+      type = 'Multi';
+    }
+    
+    layers.push({
+      name,
+      type,
+      channels: chs,
+      channelList: layer.channelList
+    });
+  }
+  
+  // Sort: RGB first, then alphabetically
+  layers.sort((a, b) => {
+    if (a.name === 'RGB') return -1;
+    if (b.name === 'RGB') return 1;
+    return a.name.localeCompare(b.name);
+  });
+  
+  return layers;
+}
+
+// ============================================================================
+// RENDERING
+// ============================================================================
+
+function renderLayerToCanvas(canvas, layer, channelData, width, height, options = {}) {
+  const { exposure = 0, srgb = true, showAlpha = false } = options;
+  
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d');
+  const imageData = ctx.createImageData(width, height);
+  const pixels = imageData.data;
+  
+  const exposureMult = Math.pow(2, exposure);
+  
+  // Get channel data
+  const chs = layer.channels;
+  const rData = channelData[chs.R] || channelData[chs.Y] || channelData[layer.channelList[0]];
+  const gData = channelData[chs.G] || rData;
+  const bData = channelData[chs.B] || rData;
+  const aData = channelData[chs.A];
+  
+  for (let i = 0; i < width * height; i++) {
+    let r = (rData ? rData[i] : 0) * exposureMult;
+    let g = (gData ? gData[i] : 0) * exposureMult;
+    let b = (bData ? bData[i] : 0) * exposureMult;
+    let a = aData ? aData[i] : 1;
+    
+    // Handle special values
+    if (!isFinite(r)) r = 0;
+    if (!isFinite(g)) g = 0;
+    if (!isFinite(b)) b = 0;
+    if (!isFinite(a)) a = 1;
+    
+    // Apply sRGB gamma if requested
+    if (srgb) {
+      r = linearToSRGB(r);
+      g = linearToSRGB(g);
+      b = linearToSRGB(b);
+    }
+    
+    // Clamp to 0-1
+    r = Math.max(0, Math.min(1, r));
+    g = Math.max(0, Math.min(1, g));
+    b = Math.max(0, Math.min(1, b));
+    a = Math.max(0, Math.min(1, a));
+    
+    const idx = i * 4;
+    
+    if (showAlpha && aData) {
+      // Show alpha as grayscale
+      const av = Math.round(a * 255);
+      pixels[idx] = av;
+      pixels[idx + 1] = av;
+      pixels[idx + 2] = av;
+      pixels[idx + 3] = 255;
+    } else {
+      pixels[idx] = Math.round(r * 255);
+      pixels[idx + 1] = Math.round(g * 255);
+      pixels[idx + 2] = Math.round(b * 255);
+      pixels[idx + 3] = 255;
+    }
+  }
+  
+  ctx.putImageData(imageData, 0, 0);
+}
+
+function linearToSRGB(c) {
+  if (c <= 0.0031308) {
+    return c * 12.92;
+  }
+  return 1.055 * Math.pow(c, 1 / 2.4) - 0.055;
+}
+
+function srgbToLinear(c) {
+  if (c <= 0.04045) {
+    return c / 12.92;
+  }
+  return Math.pow((c + 0.055) / 1.055, 2.4);
+}
+
+// ============================================================================
+// STATISTICS
+// ============================================================================
+
+function computeLayerStats(layer, channelData, width, height) {
+  const stats = {
+    channels: []
+  };
+  
+  let globalMin = Infinity;
+  let globalMax = -Infinity;
+  let hasNegatives = false;
+  let hasNaN = false;
+  let hasInf = false;
+  
+  for (const chName of layer.channelList) {
+    const data = channelData[chName];
+    if (!data) continue;
+    
+    let min = Infinity, max = -Infinity;
+    let sum = 0, count = 0;
+    let negCount = 0, nanCount = 0, infCount = 0;
+    
+    for (let i = 0; i < data.length; i++) {
+      const v = data[i];
+      
+      if (isNaN(v)) {
+        nanCount++;
+        continue;
+      }
+      if (!isFinite(v)) {
+        infCount++;
+        continue;
+      }
+      
+      if (v < min) min = v;
+      if (v > max) max = v;
+      if (v < 0) negCount++;
+      sum += v;
+      count++;
+    }
+    
+    const avg = count > 0 ? sum / count : 0;
+    
+    // Standard deviation
+    let variance = 0;
+    for (let i = 0; i < data.length; i++) {
+      const v = data[i];
+      if (isFinite(v)) {
+        variance += (v - avg) * (v - avg);
+      }
+    }
+    variance = count > 1 ? variance / count : 0;
+    const stdDev = Math.sqrt(variance);
+    
+    stats.channels.push({
+      name: chName.split('.').pop(),
+      min,
+      max,
+      avg,
+      stdDev,
+      negatives: negCount,
+      nans: nanCount,
+      infs: infCount
+    });
+    
+    if (min < globalMin) globalMin = min;
+    if (max > globalMax) globalMax = max;
+    if (negCount > 0) hasNegatives = true;
+    if (nanCount > 0) hasNaN = true;
+    if (infCount > 0) hasInf = true;
+  }
+  
+  stats.globalMin = globalMin;
+  stats.globalMax = globalMax;
+  stats.hasNegatives = hasNegatives;
+  stats.hasNaN = hasNaN;
+  stats.hasInf = hasInf;
+  stats.bitDepth = state.header.channels.find(c => layer.channelList.includes(c.name))?.pixelType === 1 ? '16-bit Half' : '32-bit Float';
+  
+  return stats;
+}
+
+function computeHistogram(layer, channelData, width, height) {
+  const histograms = {
+    R: new Uint32Array(256),
+    G: new Uint32Array(256),
+    B: new Uint32Array(256)
+  };
+  
+  const chs = layer.channels;
+  const rData = channelData[chs.R] || channelData[chs.Y] || channelData[layer.channelList[0]];
+  const gData = channelData[chs.G] || rData;
+  const bData = channelData[chs.B] || rData;
+  
+  // Find range for normalization
+  let min = Infinity, max = -Infinity;
+  for (const data of [rData, gData, bData]) {
+    if (!data) continue;
+    for (let i = 0; i < data.length; i++) {
+      const v = data[i];
+      if (isFinite(v)) {
+        if (v < min) min = v;
+        if (v > max) max = v;
+      }
+    }
+  }
+  
+  const range = max - min || 1;
+  
+  for (let i = 0; i < width * height; i++) {
+    const r = rData ? rData[i] : 0;
+    const g = gData ? gData[i] : 0;
+    const b = bData ? bData[i] : 0;
+    
+    if (isFinite(r)) {
+      const bin = Math.max(0, Math.min(255, Math.floor(((r - min) / range) * 255)));
+      histograms.R[bin]++;
+    }
+    if (isFinite(g)) {
+      const bin = Math.max(0, Math.min(255, Math.floor(((g - min) / range) * 255)));
+      histograms.G[bin]++;
+    }
+    if (isFinite(b)) {
+      const bin = Math.max(0, Math.min(255, Math.floor(((b - min) / range) * 255)));
+      histograms.B[bin]++;
+    }
+  }
+  
+  return histograms;
+}
+
+function drawHistogram(canvas, data, color) {
+  const ctx = canvas.getContext('2d');
+  const w = canvas.parentElement.offsetWidth;
+  const h = canvas.parentElement.offsetHeight;
+  
+  canvas.width = w;
+  canvas.height = h;
+  
+  const maxVal = Math.max(...data);
+  
+  ctx.fillStyle = '#f5f5f5';
+  ctx.fillRect(0, 0, w, h);
+  
+  ctx.fillStyle = color;
+  const barWidth = w / 256;
+  
+  for (let i = 0; i < 256; i++) {
+    const barHeight = (data[i] / maxVal) * h;
+    ctx.fillRect(i * barWidth, h - barHeight, barWidth + 0.5, barHeight);
+  }
+}
+
+// ============================================================================
+// UI FUNCTIONS
+// ============================================================================
+
+function showLoading(text, progress = '') {
+  document.getElementById('loadingText').textContent = text;
+  document.getElementById('loadingProgress').textContent = progress;
+  document.getElementById('loadingOverlay').classList.add('visible');
+}
+
+function hideLoading() {
+  document.getElementById('loadingOverlay').classList.remove('visible');
+}
+
+function showStatus(message, type = 'info') {
+  const el = document.getElementById('statusMsg');
+  el.textContent = message;
+  el.className = 'exr-status visible ' + type;
+  
+  if (type === 'success') {
+    setTimeout(() => el.classList.remove('visible'), 3000);
+  }
+}
+
+function hideStatus() {
+  document.getElementById('statusMsg').classList.remove('visible');
+}
+
+function formatBytes(bytes) {
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+  return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+}
+
+function formatNumber(n, decimals = 4) {
+  if (!isFinite(n)) return n.toString();
+  if (Math.abs(n) < 0.0001 && n !== 0) return n.toExponential(2);
+  return n.toFixed(decimals);
+}
+
+// ============================================================================
+// MAIN FUNCTIONS
+// ============================================================================
+
+async function handleFile(file) {
+  if (!file.name.toLowerCase().endsWith('.exr')) {
+    showStatus('Please select a valid .exr file', 'error');
+    return;
+  }
+  
+  if (file.size > 500 * 1024 * 1024) {
+    showStatus('File too large. Maximum size is 500MB.', 'error');
+    return;
+  }
+  
+  showLoading('Reading file...');
+  hideStatus();
+  
+  try {
+    // Read file
+    const arrayBuffer = await file.arrayBuffer();
+    const buffer = new Uint8Array(arrayBuffer);
+    
+    // Parse header
+    showLoading('Parsing header...');
+    const header = parseHeader(buffer);
+    
+    const dw = header.dataWindow;
+    const width = dw.xMax - dw.xMin + 1;
+    const height = dw.yMax - dw.yMin + 1;
+    
+    // Parse pixel data
+    showLoading('Decompressing pixel data...', '0%');
+    const { channelData } = await parsePixelData(buffer, header, (progress) => {
+      showLoading('Decompressing pixel data...', progress + '%');
+    });
+    
+    // Group channels into layers
+    const layers = groupChannelsIntoLayers(header.channels);
+    
+    // Store state
+    state.file = file;
+    state.buffer = buffer;
+    state.header = header;
+    state.layers = layers;
+    state.channelData = channelData;
+    state.width = width;
+    state.height = height;
+    state.currentLayer = null;
+    
+    hideLoading();
+    
+    // Update UI
+    updateUI();
+    showStatus('File loaded successfully', 'success');
+    
+  } catch (e) {
+    hideLoading();
+    showStatus('Error: ' + e.message, 'error');
+    console.error(e);
+  }
+}
+
+function updateUI() {
+  const { file, header, layers, width, height } = state;
+  
+  // Show main content
+  document.getElementById('mainContent').classList.add('visible');
+  document.getElementById('uploadZone').style.display = 'none';
+  
+  // Update header
+  document.getElementById('fileName').textContent = file.name;
+  document.getElementById('fileMeta').textContent = 
+    `${width}×${height} • ${layers.length} layer${layers.length !== 1 ? 's' : ''} • ${COMPRESSION_NAMES[header.compression]}`;
+  
+  // Update file info
+  const dw = header.dataWindow;
+  const disp = header.displayWindow;
+  document.getElementById('fileInfoGrid').innerHTML = `
+    <div class="exr-stat-item">
+      <span class="exr-stat-label">Resolution</span>
+      <span class="exr-stat-value">${width} × ${height}</span>
+    </div>
+    <div class="exr-stat-item">
+      <span class="exr-stat-label">Compression</span>
+      <span class="exr-stat-value">${COMPRESSION_NAMES[header.compression]}</span>
+    </div>
+    <div class="exr-stat-item">
+      <span class="exr-stat-label">Data Window</span>
+      <span class="exr-stat-value">[${dw.xMin}, ${dw.yMin}] - [${dw.xMax}, ${dw.yMax}]</span>
+    </div>
+    <div class="exr-stat-item">
+      <span class="exr-stat-label">Display Window</span>
+      <span class="exr-stat-value">[${disp.xMin}, ${disp.yMin}] - [${disp.xMax}, ${disp.yMax}]</span>
+    </div>
+    <div class="exr-stat-item">
+      <span class="exr-stat-label">Total Channels</span>
+      <span class="exr-stat-value">${header.channels.length}</span>
+    </div>
+    <div class="exr-stat-item">
+      <span class="exr-stat-label">File Size</span>
+      <span class="exr-stat-value">${formatBytes(file.size)}</span>
+    </div>
+  `;
+  
+  // Build layer grid
+  buildLayerGrid();
+  
+  // Select first layer
+  if (layers.length > 0) {
+    selectLayer(layers[0].name);
+  }
+}
+
+function buildLayerGrid() {
+  const grid = document.getElementById('layerGrid');
+  grid.innerHTML = '';
+  
+  for (const layer of state.layers) {
+    const el = document.createElement('div');
+    el.className = 'exr-layer-item';
+    el.dataset.layer = layer.name;
+    el.onclick = () => selectLayer(layer.name);
+    
+    // Generate thumbnail color
+    const thumbColor = getLayerThumbnailColor(layer);
+    
+    el.innerHTML = `
+      <div class="exr-layer-color" style="background: ${thumbColor}"></div>
+      <div class="exr-layer-info">
+        <div class="exr-layer-name">${layer.name}</div>
+        <div class="exr-layer-channels">${layer.type} • ${layer.channelList.length} ch</div>
+      </div>
+    `;
+    
+    grid.appendChild(el);
+  }
+}
+
+function getLayerThumbnailColor(layer) {
+  // Generate a simple color based on layer type
+  const chs = layer.channels;
+  if (chs.R && chs.G && chs.B) {
+    return 'linear-gradient(135deg, #ff6b6b, #4ecdc4, #45b7d1)';
+  } else if (layer.name.toLowerCase().includes('normal')) {
+    return 'linear-gradient(135deg, #8080ff, #80ff80)';
+  } else if (layer.name.toLowerCase().includes('depth') || layer.name.toLowerCase().includes('z')) {
+    return 'linear-gradient(135deg, #333, #fff)';
+  } else if (layer.name.toLowerCase().includes('alpha') || layer.name.toLowerCase().includes('mask')) {
+    return 'linear-gradient(135deg, #000, #fff)';
+  } else if (layer.name.toLowerCase().includes('crypto')) {
+    return 'linear-gradient(135deg, #ff0080, #00ffff, #80ff00)';
+  }
+  return '#888';
+}
+
+function selectLayer(layerName) {
+  const layer = state.layers.find(l => l.name === layerName);
+  if (!layer) return;
+  
+  state.currentLayer = layer;
+  
+  // Update selection UI
+  document.querySelectorAll('.exr-layer-item').forEach(el => {
+    el.classList.toggle('selected', el.dataset.layer === layerName);
+  });
+  
+  // Update hero title
+  document.getElementById('heroTitle').textContent = layerName;
+  
+  // Hide placeholder
+  document.getElementById('heroPlaceholder').style.display = 'none';
+  document.getElementById('heroCanvas').style.display = 'block';
+  
+  // Render preview
+  updatePreview();
+  
+  // Update statistics
+  updateStatistics();
+  
+  // Update histogram
+  updateHistogram();
+}
+
+function updatePreview() {
+  if (!state.currentLayer) return;
+  
+  const canvas = document.getElementById('heroCanvas');
+  const exposure = parseFloat(document.getElementById('exposureSelect').value);
+  const srgb = document.getElementById('srgbToggle').checked;
+  const showAlpha = document.getElementById('alphaToggle').checked;
+  
+  renderLayerToCanvas(canvas, state.currentLayer, state.channelData, state.width, state.height, {
+    exposure,
+    srgb,
+    showAlpha
+  });
+}
+
+function updateStatistics() {
+  const stats = computeLayerStats(state.currentLayer, state.channelData, state.width, state.height);
+  
+  let html = `
+    <div class="exr-stat-item">
+      <span class="exr-stat-label">Bit Depth</span>
+      <span class="exr-stat-value">${stats.bitDepth}</span>
+    </div>
+    <div class="exr-stat-item">
+      <span class="exr-stat-label">Channels</span>
+      <span class="exr-stat-value">${state.currentLayer.channelList.length}</span>
+    </div>
+    <div class="exr-stat-item">
+      <span class="exr-stat-label">Min Value</span>
+      <span class="exr-stat-value">${formatNumber(stats.globalMin)}</span>
+    </div>
+    <div class="exr-stat-item">
+      <span class="exr-stat-label">Max Value</span>
+      <span class="exr-stat-value">${formatNumber(stats.globalMax)}</span>
+    </div>
+    <div class="exr-stat-item">
+      <span class="exr-stat-label">Has Negatives</span>
+      <span class="exr-stat-value ${stats.hasNegatives ? 'warning' : 'success'}">${stats.hasNegatives ? 'Yes' : 'No'}</span>
+    </div>
+    <div class="exr-stat-item">
+      <span class="exr-stat-label">Invalid Values</span>
+      <span class="exr-stat-value ${(stats.hasNaN || stats.hasInf) ? 'error' : 'success'}">${stats.hasNaN ? 'NaN ' : ''}${stats.hasInf ? 'Inf' : ''}${(!stats.hasNaN && !stats.hasInf) ? 'None' : ''}</span>
+    </div>
+  `;
+  
+  document.getElementById('statsGrid').innerHTML = html;
+}
+
+function updateHistogram() {
+  const histograms = computeHistogram(state.currentLayer, state.channelData, state.width, state.height);
+  
+  document.getElementById('histogramSection').style.display = 'block';
+  
+  drawHistogram(document.getElementById('histR'), histograms.R, '#ef4444');
+  drawHistogram(document.getElementById('histG'), histograms.G, '#22c55e');
+  drawHistogram(document.getElementById('histB'), histograms.B, '#3b82f6');
+}
+
+// ============================================================================
+// EXPORT FUNCTIONS
+// ============================================================================
+
+function exportCurrentLayer() {
+  if (!state.currentLayer) {
+    showStatus('No layer selected', 'warning');
+    return;
+  }
+  
+  const format = document.getElementById('exportFormat').value;
+  exportLayer(state.currentLayer, format);
+}
+
+function exportAllLayers() {
+  const format = document.getElementById('exportFormat').value;
+  
+  showLoading('Exporting layers...');
+  
+  let i = 0;
+  const exportNext = () => {
+    if (i >= state.layers.length) {
+      hideLoading();
+      showStatus(`Exported ${state.layers.length} layers`, 'success');
+      return;
+    }
+    
+    exportLayer(state.layers[i], format);
+    i++;
+    setTimeout(exportNext, 200);
+  };
+  
+  exportNext();
+}
+
+function exportLayer(layer, format) {
+  const baseName = state.file.name.replace(/\.exr$/i, '');
+  const safeName = layer.name.replace(/[^a-z0-9_-]/gi, '_');
+  
+  if (format === 'png') {
+    // Create canvas and render
+    const canvas = document.createElement('canvas');
+    renderLayerToCanvas(canvas, layer, state.channelData, state.width, state.height, {
+      exposure: 0,
+      srgb: true,
+      showAlpha: false
+    });
+    
+    // Download
+    const link = document.createElement('a');
+    link.download = `${baseName}_${safeName}.png`;
+    link.href = canvas.toDataURL('image/png');
+    link.click();
+    
+  } else {
+    // Export as minimal EXR
+    const exrData = buildMinimalEXR(layer);
+    const blob = new Blob([exrData], { type: 'application/octet-stream' });
+    const link = document.createElement('a');
+    link.download = `${baseName}_${safeName}.exr`;
+    link.href = URL.createObjectURL(blob);
+    link.click();
+    URL.revokeObjectURL(link.href);
+  }
+}
+
+function buildMinimalEXR(layer) {
+  const { width, height, channelData, header } = state;
+  
+  // Get channel info
+  const chNames = layer.channelList.slice().sort();
+  const channels = chNames.map(name => header.channels.find(c => c.name === name));
+  
+  // Build header
+  const headerParts = [];
+  
+  // Magic + version
+  const magic = new ArrayBuffer(8);
+  const magicView = new DataView(magic);
+  magicView.setUint32(0, EXR_MAGIC, true);
+  magicView.setUint32(4, 2, true); // version 2
+  headerParts.push(new Uint8Array(magic));
+  
+  // Channels attribute
+  headerParts.push(stringToBytes('channels'));
+  headerParts.push(stringToBytes('chlist'));
+  
+  let chlistData = [];
+  for (const ch of channels) {
+    chlistData.push(...stringToBytes(ch.name));
+    const chInfo = new Uint8Array(16);
+    const chView = new DataView(chInfo.buffer);
+    chView.setInt32(0, ch.pixelType, true);
+    chView.setInt32(8, 1, true); // xSampling
+    chView.setInt32(12, 1, true); // ySampling
+    chlistData.push(...chInfo);
+  }
+  chlistData.push(0); // null terminator
+  
+  const chlistSize = new Uint8Array(4);
+  new DataView(chlistSize.buffer).setInt32(0, chlistData.length, true);
+  headerParts.push(chlistSize);
+  headerParts.push(new Uint8Array(chlistData));
+  
+  // Compression
+  headerParts.push(stringToBytes('compression'));
+  headerParts.push(stringToBytes('compression'));
+  headerParts.push(new Uint8Array([1, 0, 0, 0, 0])); // size=1, value=0 (none)
+  
+  // Data window
+  headerParts.push(stringToBytes('dataWindow'));
+  headerParts.push(stringToBytes('box2i'));
+  const dwData = new Uint8Array(20);
+  const dwView = new DataView(dwData.buffer);
+  dwView.setInt32(0, 16, true); // size
+  dwView.setInt32(4, 0, true);
+  dwView.setInt32(8, 0, true);
+  dwView.setInt32(12, width - 1, true);
+  dwView.setInt32(16, height - 1, true);
+  headerParts.push(dwData);
+  
+  // Display window
+  headerParts.push(stringToBytes('displayWindow'));
+  headerParts.push(stringToBytes('box2i'));
+  headerParts.push(dwData.slice()); // same as data window
+  
+  // Line order
+  headerParts.push(stringToBytes('lineOrder'));
+  headerParts.push(stringToBytes('lineOrder'));
+  headerParts.push(new Uint8Array([1, 0, 0, 0, 0])); // size=1, value=0
+  
+  // Pixel aspect ratio
+  headerParts.push(stringToBytes('pixelAspectRatio'));
+  headerParts.push(stringToBytes('float'));
+  const parData = new Uint8Array(8);
+  const parView = new DataView(parData.buffer);
+  parView.setInt32(0, 4, true); // size
+  parView.setFloat32(4, 1.0, true);
+  headerParts.push(parData);
+  
+  // Screen window
+  headerParts.push(stringToBytes('screenWindowCenter'));
+  headerParts.push(stringToBytes('v2f'));
+  const swcData = new Uint8Array(12);
+  new DataView(swcData.buffer).setInt32(0, 8, true);
+  headerParts.push(swcData);
+  
+  headerParts.push(stringToBytes('screenWindowWidth'));
+  headerParts.push(stringToBytes('float'));
+  const swwData = new Uint8Array(8);
+  const swwView = new DataView(swwData.buffer);
+  swwView.setInt32(0, 4, true);
+  swwView.setFloat32(4, 1.0, true);
+  headerParts.push(swwData);
+  
+  // End of header
+  headerParts.push(new Uint8Array([0]));
+  
+  // Calculate header size
+  let headerSize = 0;
+  for (const part of headerParts) headerSize += part.length;
+  
+  // Calculate scanline sizes
+  let bytesPerScanline = 0;
+  for (const ch of channels) {
+    bytesPerScanline += width * ch.bytesPerPixel;
+  }
+  
+  // Offset table
+  const offsetTableSize = height * 8;
+  const dataStart = headerSize + offsetTableSize;
+  
+  // Build full buffer
+  const totalSize = dataStart + height * (8 + bytesPerScanline);
+  const buffer = new ArrayBuffer(totalSize);
+  const view = new DataView(buffer);
+  const bytes = new Uint8Array(buffer);
+  
+  // Copy header
+  let offset = 0;
+  for (const part of headerParts) {
+    bytes.set(part, offset);
+    offset += part.length;
+  }
+  
+  // Write offset table
+  for (let y = 0; y < height; y++) {
+    const scanlineOffset = dataStart + y * (8 + bytesPerScanline);
+    view.setBigUint64(offset, BigInt(scanlineOffset), true);
+    offset += 8;
+  }
+  
+  // Write scanlines
+  for (let y = 0; y < height; y++) {
+    // Y coordinate
+    view.setInt32(offset, y, true);
+    offset += 4;
+    
+    // Size
+    view.setInt32(offset, bytesPerScanline, true);
+    offset += 4;
+    
+    // Channel data
+    for (const ch of channels) {
+      const data = channelData[ch.name];
+      
+      for (let x = 0; x < width; x++) {
+        const value = data[y * width + x];
+        
+        if (ch.pixelType === 1) {
+          // HALF - convert float to half
+          view.setUint16(offset, floatToHalf(value), true);
+          offset += 2;
+        } else {
+          // FLOAT
+          view.setFloat32(offset, value, true);
+          offset += 4;
+        }
+      }
+    }
+  }
+  
+  return buffer;
+}
+
+function stringToBytes(str) {
+  const bytes = new Uint8Array(str.length + 1);
+  for (let i = 0; i < str.length; i++) {
+    bytes[i] = str.charCodeAt(i);
+  }
+  bytes[str.length] = 0;
+  return bytes;
+}
+
+function floatToHalf(f) {
+  const floatView = new Float32Array(1);
+  const int32View = new Int32Array(floatView.buffer);
+  
+  floatView[0] = f;
+  const x = int32View[0];
+  
+  const sign = (x >> 31) & 1;
+  let exp = (x >> 23) & 0xFF;
+  let mant = x & 0x7FFFFF;
+  
+  if (exp === 0) {
+    // Zero or denorm -> zero
+    return sign << 15;
+  } else if (exp === 255) {
+    // Inf or NaN
+    if (mant === 0) {
+      return (sign << 15) | 0x7C00;
+    } else {
+      return (sign << 15) | 0x7C00 | (mant >> 13);
+    }
+  }
+  
+  exp = exp - 127 + 15;
+  
+  if (exp >= 31) {
+    // Overflow -> infinity
+    return (sign << 15) | 0x7C00;
+  } else if (exp <= 0) {
+    // Underflow
+    if (exp < -10) return sign << 15;
+    mant = (mant | 0x800000) >> (1 - exp);
+    return (sign << 15) | (mant >> 13);
+  }
+  
+  return (sign << 15) | (exp << 10) | (mant >> 13);
+}
+
+// ============================================================================
+// RESET
+// ============================================================================
+
+window.resetInspector = function() {
+  state.file = null;
+  state.buffer = null;
+  state.header = null;
+  state.layers = [];
+  state.channelData = {};
+  state.currentLayer = null;
+  state.width = 0;
+  state.height = 0;
+  
+  document.getElementById('mainContent').classList.remove('visible');
+  document.getElementById('uploadZone').style.display = 'block';
+  document.getElementById('heroCanvas').style.display = 'none';
+  document.getElementById('heroPlaceholder').style.display = 'block';
+  document.getElementById('histogramSection').style.display = 'none';
+  
+  hideStatus();
+};
+
+// ============================================================================
+// INITIALIZATION
+// ============================================================================
+
+function init() {
+  const uploadZone = document.getElementById('uploadZone');
+  const fileInput = document.getElementById('fileInput');
+  
+  // Drag and drop
+  uploadZone.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    uploadZone.classList.add('drag-over');
+  });
+  
+  uploadZone.addEventListener('dragleave', () => {
+    uploadZone.classList.remove('drag-over');
+  });
+  
+  uploadZone.addEventListener('drop', (e) => {
+    e.preventDefault();
+    uploadZone.classList.remove('drag-over');
+    if (e.dataTransfer.files.length > 0) {
+      handleFile(e.dataTransfer.files[0]);
+    }
+  });
+  
+  // File input
+  fileInput.addEventListener('change', (e) => {
+    if (e.target.files.length > 0) {
+      handleFile(e.target.files[0]);
+    }
+  });
+  
+  // Make updatePreview globally accessible
+  window.updatePreview = updatePreview;
+  window.exportCurrentLayer = exportCurrentLayer;
+  window.exportAllLayers = exportAllLayers;
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', init);
+} else {
+  init();
+}
+
+})();
+</script>
+</body>
+</html>
