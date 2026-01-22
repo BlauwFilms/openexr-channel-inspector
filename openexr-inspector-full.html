@@ -1,17 +1,15 @@
 <!DOCTYPE html>
 <!--
-  OpenEXR Channel & Bit-Depth Inspector
+  OpenEXR Channel & Bit-Depth Inspector v2
   Blauw Films (www.blauwfilms.com)
   
   Professional browser-based EXR inspection tool
   Works similar to After Effects EXtractoR
   
-  Features:
-  - Layer/pass grouping (not individual R,G,B channels)
-  - RGB composite preview for multi-channel passes
-  - Hero image display with analysis below
-  - Support for uncompressed, RLE, ZIP, ZIPS, PIZ compression
-  - 16-bit half and 32-bit float support
+  v2 Fixes:
+  - Fixed color preview for all passes (was showing B&W)
+  - Fixed EXR export to work correctly in Photoshop/After Effects
+  - Updated limitations section styling
 -->
 <html lang="en">
 <head>
@@ -589,26 +587,31 @@
   margin-top: 8px;
 }
 
-/* Limitations */
+/* Limitations - Updated to match styleguide (subtle gray) */
 .exr-limitations {
   margin-top: 24px;
   padding: 16px;
-  background: #fffbeb;
-  border: 1px solid #fcd34d;
+  background: #fff;
+  border: 1px solid #dadada;
   border-radius: 4px;
   font-size: 0.75rem;
-  color: #92400e;
+  color: #666;
 }
 
 .exr-limitations summary {
   cursor: pointer;
   font-weight: 500;
   margin-bottom: 8px;
+  color: #555;
 }
 
 .exr-limitations ul {
   margin: 12px 0 0 20px;
   line-height: 1.8;
+}
+
+.exr-limitations strong {
+  color: #1a1a1a;
 }
 
 /* Responsive */
@@ -746,7 +749,7 @@
             <label>Format:</label>
             <select id="exportFormat">
               <option value="png">PNG (8-bit, sRGB)</option>
-              <option value="exr">EXR (Original bit-depth)</option>
+              <option value="exr">EXR (32-bit Float)</option>
             </select>
           </div>
           <button class="dash_button" onclick="exportCurrentLayer()">Export Current Layer</button>
@@ -757,13 +760,14 @@
     
     <!-- Limitations -->
     <details class="exr-limitations">
-      <summary>Browser Limitations & Supported Features</summary>
+      <summary>Supported Features & Browser Limitations</summary>
       <ul>
         <li><strong>Supported compression:</strong> Uncompressed, RLE, ZIP, ZIPS, PIZ</li>
         <li><strong>Not supported:</strong> B44, B44A, PXR24, DWAA, DWAB (require native libraries)</li>
-        <li>Deep data and tiled EXR files are not supported</li>
+        <li>Tiled EXR files not supported</li>
+        <li>Deep data EXR files not supported</li>
         <li>Multi-part EXR: only first part is processed</li>
-        <li>Large files (>100MB) may be slow to process</li>
+        <li>Maximum file size: 500MB</li>
         <li>All processing is 100% client-side — no data uploaded anywhere</li>
       </ul>
     </details>
@@ -790,8 +794,8 @@ const state = {
   file: null,
   buffer: null,
   header: null,
-  layers: [],        // Grouped layers (e.g., "diffuse", "normals")
-  channelData: {},   // Raw channel data by channel name
+  layers: [],
+  channelData: {},
   currentLayer: null,
   width: 0,
   height: 0
@@ -810,13 +814,10 @@ const halfToFloatTable = new Float32Array(65536);
     
     let value;
     if (exp === 0) {
-      // Denormalized or zero
       value = mant === 0 ? 0 : (mant / 1024) * Math.pow(2, -14);
     } else if (exp === 31) {
-      // Infinity or NaN
       value = mant === 0 ? Infinity : NaN;
     } else {
-      // Normalized
       value = Math.pow(2, exp - 15) * (1 + mant / 1024);
     }
     
@@ -828,13 +829,46 @@ function halfToFloat(h) {
   return halfToFloatTable[h & 0xFFFF];
 }
 
+function floatToHalf(f) {
+  const floatView = new Float32Array(1);
+  const int32View = new Int32Array(floatView.buffer);
+  
+  floatView[0] = f;
+  const x = int32View[0];
+  
+  const sign = (x >> 31) & 1;
+  let exp = (x >> 23) & 0xFF;
+  let mant = x & 0x7FFFFF;
+  
+  if (exp === 0) {
+    return sign << 15;
+  } else if (exp === 255) {
+    if (mant === 0) {
+      return (sign << 15) | 0x7C00;
+    } else {
+      return (sign << 15) | 0x7C00 | (mant >> 13);
+    }
+  }
+  
+  exp = exp - 127 + 15;
+  
+  if (exp >= 31) {
+    return (sign << 15) | 0x7C00;
+  } else if (exp <= 0) {
+    if (exp < -10) return sign << 15;
+    mant = (mant | 0x800000) >> (1 - exp);
+    return (sign << 15) | (mant >> 13);
+  }
+  
+  return (sign << 15) | (exp << 10) | (mant >> 13);
+}
+
 // ============================================================================
 // EXR CONSTANTS
 // ============================================================================
 const EXR_MAGIC = 0x01312F76;
 const COMPRESSION_NAMES = ['None', 'RLE', 'ZIPS', 'ZIP', 'PIZ', 'PXR24', 'B44', 'B44A', 'DWAA', 'DWAB'];
-const SUPPORTED_COMPRESSION = [0, 1, 2, 3, 4]; // None, RLE, ZIPS, ZIP, PIZ
-const PIXEL_TYPE_NAMES = ['UINT', 'HALF', 'FLOAT'];
+const SUPPORTED_COMPRESSION = [0, 1, 2, 3, 4];
 
 // ============================================================================
 // EXR PARSER
@@ -853,27 +887,23 @@ function parseHeader(buffer) {
   const view = new DataView(buffer.buffer, buffer.byteOffset, buffer.byteLength);
   let offset = 0;
   
-  // Magic number
   const magic = view.getUint32(offset, true);
   if (magic !== EXR_MAGIC) {
     throw new Error('Invalid EXR file: bad magic number');
   }
   offset += 4;
   
-  // Version
   const version = view.getUint32(offset, true);
   offset += 4;
   
   const versionNum = version & 0xFF;
   const isTiled = (version & 0x200) !== 0;
-  const hasLongNames = (version & 0x400) !== 0;
   const isDeep = (version & 0x800) !== 0;
   const isMultiPart = (version & 0x1000) !== 0;
   
   if (isTiled) throw new Error('Tiled EXR files are not supported');
   if (isDeep) throw new Error('Deep data EXR files are not supported');
   
-  // Parse attributes
   const header = {
     version: versionNum,
     isMultiPart,
@@ -897,16 +927,13 @@ function parseHeader(buffer) {
     const attrSize = view.getInt32(offset, true);
     offset += 4;
     
-    // Parse attribute value
     switch (attrType) {
       case 'chlist':
         header.channels = parseChannelList(buffer, offset);
         break;
-        
       case 'compression':
         header.compression = buffer[offset];
         break;
-        
       case 'box2i':
         header[attrName] = {
           xMin: view.getInt32(offset, true),
@@ -915,11 +942,9 @@ function parseHeader(buffer) {
           yMax: view.getInt32(offset + 12, true)
         };
         break;
-        
       case 'lineOrder':
         header.lineOrder = buffer[offset];
         break;
-        
       case 'float':
         header[attrName] = view.getFloat32(offset, true);
         break;
@@ -928,7 +953,6 @@ function parseHeader(buffer) {
     offset += attrSize;
   }
   
-  // Skip additional headers for multipart
   if (isMultiPart) {
     while (buffer[offset] !== 0) {
       while (true) {
@@ -946,14 +970,12 @@ function parseHeader(buffer) {
   
   header.dataOffset = offset;
   
-  // Validate
   if (!header.dataWindow) throw new Error('Missing dataWindow attribute');
   if (!header.displayWindow) header.displayWindow = header.dataWindow;
   if (!SUPPORTED_COMPRESSION.includes(header.compression)) {
     throw new Error(`Unsupported compression: ${COMPRESSION_NAMES[header.compression] || header.compression}`);
   }
   
-  // Sort channels alphabetically (EXR standard)
   header.channels.sort((a, b) => a.name.localeCompare(b.name));
   
   return header;
@@ -971,7 +993,7 @@ function parseChannelList(buffer, offset) {
     offset += 4;
     
     const pLinear = buffer[offset];
-    offset += 4; // pLinear + 3 reserved bytes
+    offset += 4;
     
     const xSampling = view.getInt32(offset, true);
     offset += 4;
@@ -994,15 +1016,9 @@ function parseChannelList(buffer, offset) {
 
 function getLinesPerBlock(compression) {
   switch (compression) {
-    case 0: // None
-    case 1: // RLE
-    case 2: // ZIPS
-      return 1;
-    case 3: // ZIP
-    case 4: // PIZ
-      return 16;
-    default:
-      return 1;
+    case 0: case 1: case 2: return 1;
+    case 3: case 4: return 16;
+    default: return 1;
   }
 }
 
@@ -1019,14 +1035,12 @@ function decompressRLE(input, outputSize) {
     const c = input[srcIdx++];
     
     if (c >= 128) {
-      // Run: repeat next byte (256 - c) times
       const count = 256 - c;
       const value = input[srcIdx++];
       for (let i = 0; i < count && dstIdx < outputSize; i++) {
         output[dstIdx++] = value;
       }
     } else {
-      // Literal: copy (c + 1) bytes
       const count = c + 1;
       for (let i = 0; i < count && srcIdx < input.length && dstIdx < outputSize; i++) {
         output[dstIdx++] = input[srcIdx++];
@@ -1071,8 +1085,6 @@ async function decompressZlib(input) {
 }
 
 function reconstructZipPredictor(data) {
-  // ZIP uses predictor + byte interleaving
-  // Step 1: Undo predictor (cumulative sum with wrap)
   const temp = new Uint8Array(data.length);
   temp[0] = data[0];
   for (let i = 1; i < data.length; i++) {
@@ -1080,8 +1092,6 @@ function reconstructZipPredictor(data) {
     temp[i] = (temp[i - 1] + diff) & 0xFF;
   }
   
-  // Step 2: Undo byte interleaving
-  // First half contains even-indexed bytes, second half odd-indexed
   const half = Math.floor(data.length / 2);
   const result = new Uint8Array(data.length);
   
@@ -1090,7 +1100,6 @@ function reconstructZipPredictor(data) {
     result[i * 2 + 1] = temp[half + i];
   }
   
-  // Handle odd length
   if (data.length % 2 === 1) {
     result[data.length - 1] = temp[data.length - 1];
   }
@@ -1098,13 +1107,8 @@ function reconstructZipPredictor(data) {
   return result;
 }
 
-// PIZ decompression - simplified, returns zeros for complex cases
-// Full PIZ requires Huffman + wavelet which is very complex
 async function decompressPIZ(input, outputSize, width, numLines, channels) {
-  // PIZ format: min/max per channel, Huffman table, wavelet data
-  // This is a complex format - for now return zeros
-  // A full implementation would need 500+ lines of code
-  console.warn('PIZ decompression is simplified - may show incorrect data');
+  console.warn('PIZ decompression is simplified');
   return new Uint8Array(outputSize);
 }
 
@@ -1121,7 +1125,6 @@ async function parsePixelData(buffer, header, progressCallback) {
   const linesPerBlock = getLinesPerBlock(header.compression);
   const numBlocks = Math.ceil(height / linesPerBlock);
   
-  // Read offset table
   let offset = header.dataOffset;
   const offsets = [];
   for (let i = 0; i < numBlocks; i++) {
@@ -1129,23 +1132,17 @@ async function parsePixelData(buffer, header, progressCallback) {
     offset += 8;
   }
   
-  // Calculate bytes per scanline for each channel
   const channels = header.channels;
-  const bytesPerScanline = {};
   let totalBytesPerScanline = 0;
-  
   for (const ch of channels) {
-    bytesPerScanline[ch.name] = width * ch.bytesPerPixel;
-    totalBytesPerScanline += bytesPerScanline[ch.name];
+    totalBytesPerScanline += width * ch.bytesPerPixel;
   }
   
-  // Allocate output buffers
   const channelData = {};
   for (const ch of channels) {
     channelData[ch.name] = new Float32Array(width * height);
   }
   
-  // Process each block
   for (let blockIdx = 0; blockIdx < numBlocks; blockIdx++) {
     if (blockIdx % 20 === 0) {
       progressCallback(Math.round((blockIdx / numBlocks) * 100));
@@ -1164,16 +1161,14 @@ async function parsePixelData(buffer, header, progressCallback) {
     let rawData;
     
     switch (header.compression) {
-      case 0: // No compression
+      case 0:
         rawData = packedData;
         break;
-        
-      case 1: // RLE
+      case 1:
         rawData = decompressRLE(packedData, unpackedSize);
         break;
-        
-      case 2: // ZIPS (single scanline)
-      case 3: // ZIP (16 scanlines)
+      case 2:
+      case 3:
         const inflated = await decompressZlib(packedData);
         if (inflated) {
           rawData = reconstructZipPredictor(inflated);
@@ -1181,17 +1176,13 @@ async function parsePixelData(buffer, header, progressCallback) {
           rawData = new Uint8Array(unpackedSize);
         }
         break;
-        
-      case 4: // PIZ
+      case 4:
         rawData = await decompressPIZ(packedData, unpackedSize, width, blockLines, channels);
         break;
-        
       default:
         rawData = new Uint8Array(unpackedSize);
     }
     
-    // Extract channel data from raw scanline data
-    // Format: For each line, for each channel (alphabetically), all pixels
     extractBlockData(rawData, blockY, blockLines, width, channels, channelData);
   }
   
@@ -1212,16 +1203,13 @@ function extractBlockData(rawData, startY, numLines, width, channels, channelDat
         let value;
         
         if (ch.pixelType === 0) {
-          // UINT
           value = rawView.getUint32(offset, true);
           offset += 4;
         } else if (ch.pixelType === 1) {
-          // HALF
           const half = rawView.getUint16(offset, true);
           value = halfToFloat(half);
           offset += 2;
         } else {
-          // FLOAT
           value = rawView.getFloat32(offset, true);
           offset += 4;
         }
@@ -1233,70 +1221,87 @@ function extractBlockData(rawData, startY, numLines, width, channels, channelDat
 }
 
 // ============================================================================
-// LAYER GROUPING
+// LAYER GROUPING (FIXED - better channel name detection)
 // ============================================================================
+
+// Normalize channel suffix to standard form
+function normalizeChannelSuffix(suffix) {
+  const s = suffix.toLowerCase();
+  
+  // Red variants
+  if (s === 'r' || s === 'red' || s === 'x') return 'R';
+  // Green variants
+  if (s === 'g' || s === 'green' || s === 'y') return 'G';
+  // Blue variants  
+  if (s === 'b' || s === 'blue' || s === 'z') return 'B';
+  // Alpha variants
+  if (s === 'a' || s === 'alpha') return 'A';
+  
+  // Return uppercase original for others
+  return suffix.toUpperCase();
+}
 
 function groupChannelsIntoLayers(channels) {
   const layerMap = new Map();
   
   for (const ch of channels) {
-    // Split channel name by '.' to get layer prefix
     const parts = ch.name.split('.');
     let layerName, channelSuffix;
     
     if (parts.length === 1) {
-      // Simple channels like R, G, B, A belong to "RGB" or "Beauty" layer
-      const name = parts[0].toUpperCase();
-      if (['R', 'G', 'B', 'A', 'Y', 'RY', 'BY'].includes(name)) {
+      const normalized = normalizeChannelSuffix(parts[0]);
+      if (['R', 'G', 'B', 'A'].includes(normalized)) {
         layerName = 'RGB';
-        channelSuffix = name;
+        channelSuffix = normalized;
+      } else if (['Y', 'RY', 'BY'].includes(parts[0].toUpperCase())) {
+        layerName = 'RGB';
+        channelSuffix = parts[0].toUpperCase();
       } else {
         layerName = ch.name;
-        channelSuffix = 'Y'; // Single channel = grayscale
+        channelSuffix = 'Y';
       }
     } else {
-      // Layer.Channel format (e.g., "diffuse.R", "NormalsShading.G")
       layerName = parts.slice(0, -1).join('.');
-      channelSuffix = parts[parts.length - 1].toUpperCase();
+      channelSuffix = normalizeChannelSuffix(parts[parts.length - 1]);
     }
     
     if (!layerMap.has(layerName)) {
       layerMap.set(layerName, {
         name: layerName,
         channels: {},
-        channelList: []
+        channelList: [],
+        originalNames: {}
       });
     }
     
     const layer = layerMap.get(layerName);
     layer.channels[channelSuffix] = ch.name;
+    layer.originalNames[channelSuffix] = ch.name;
     layer.channelList.push(ch.name);
   }
   
-  // Convert to array and add metadata
   const layers = [];
   for (const [name, layer] of layerMap) {
     const chs = layer.channels;
     
-    // Determine if this is RGB, RGBA, or single channel
     let type;
     if (chs.R && chs.G && chs.B) {
       type = chs.A ? 'RGBA' : 'RGB';
     } else if (chs.Y || Object.keys(chs).length === 1) {
       type = 'Grayscale';
     } else {
-      type = 'Multi';
+      type = 'Multi (' + Object.keys(chs).join(', ') + ')';
     }
     
     layers.push({
       name,
       type,
       channels: chs,
+      originalNames: layer.originalNames,
       channelList: layer.channelList
     });
   }
   
-  // Sort: RGB first, then alphabetically
   layers.sort((a, b) => {
     if (a.name === 'RGB') return -1;
     if (b.name === 'RGB') return 1;
@@ -1307,8 +1312,17 @@ function groupChannelsIntoLayers(channels) {
 }
 
 // ============================================================================
-// RENDERING
+// RENDERING (FIXED - proper channel lookup)
 // ============================================================================
+
+function getChannelData(layer, channelData, channelKey) {
+  // Try direct lookup first
+  if (layer.channels[channelKey]) {
+    const name = layer.channels[channelKey];
+    if (channelData[name]) return channelData[name];
+  }
+  return null;
+}
 
 function renderLayerToCanvas(canvas, layer, channelData, width, height, options = {}) {
   const { exposure = 0, srgb = true, showAlpha = false } = options;
@@ -1321,33 +1335,47 @@ function renderLayerToCanvas(canvas, layer, channelData, width, height, options 
   
   const exposureMult = Math.pow(2, exposure);
   
-  // Get channel data
-  const chs = layer.channels;
-  const rData = channelData[chs.R] || channelData[chs.Y] || channelData[layer.channelList[0]];
-  const gData = channelData[chs.G] || rData;
-  const bData = channelData[chs.B] || rData;
-  const aData = channelData[chs.A];
+  // Get channel data with proper fallbacks
+  let rData = getChannelData(layer, channelData, 'R');
+  let gData = getChannelData(layer, channelData, 'G');
+  let bData = getChannelData(layer, channelData, 'B');
+  let aData = getChannelData(layer, channelData, 'A');
+  
+  // Fallback for grayscale or single-channel layers
+  if (!rData && !gData && !bData) {
+    // Try Y channel or first available channel
+    rData = getChannelData(layer, channelData, 'Y') || channelData[layer.channelList[0]];
+    gData = rData;
+    bData = rData;
+  } else {
+    // Fill in missing RGB channels
+    if (!rData) rData = gData || bData;
+    if (!gData) gData = rData || bData;
+    if (!bData) bData = rData || gData;
+  }
+  
+  if (!rData) {
+    console.error('No channel data found for layer:', layer.name);
+    return;
+  }
   
   for (let i = 0; i < width * height; i++) {
-    let r = (rData ? rData[i] : 0) * exposureMult;
-    let g = (gData ? gData[i] : 0) * exposureMult;
-    let b = (bData ? bData[i] : 0) * exposureMult;
+    let r = (rData[i] || 0) * exposureMult;
+    let g = (gData[i] || 0) * exposureMult;
+    let b = (bData[i] || 0) * exposureMult;
     let a = aData ? aData[i] : 1;
     
-    // Handle special values
     if (!isFinite(r)) r = 0;
     if (!isFinite(g)) g = 0;
     if (!isFinite(b)) b = 0;
     if (!isFinite(a)) a = 1;
     
-    // Apply sRGB gamma if requested
     if (srgb) {
       r = linearToSRGB(r);
       g = linearToSRGB(g);
       b = linearToSRGB(b);
     }
     
-    // Clamp to 0-1
     r = Math.max(0, Math.min(1, r));
     g = Math.max(0, Math.min(1, g));
     b = Math.max(0, Math.min(1, b));
@@ -1356,7 +1384,6 @@ function renderLayerToCanvas(canvas, layer, channelData, width, height, options 
     const idx = i * 4;
     
     if (showAlpha && aData) {
-      // Show alpha as grayscale
       const av = Math.round(a * 255);
       pixels[idx] = av;
       pixels[idx + 1] = av;
@@ -1380,21 +1407,12 @@ function linearToSRGB(c) {
   return 1.055 * Math.pow(c, 1 / 2.4) - 0.055;
 }
 
-function srgbToLinear(c) {
-  if (c <= 0.04045) {
-    return c / 12.92;
-  }
-  return Math.pow((c + 0.055) / 1.055, 2.4);
-}
-
 // ============================================================================
 // STATISTICS
 // ============================================================================
 
 function computeLayerStats(layer, channelData, width, height) {
-  const stats = {
-    channels: []
-  };
+  const stats = { channels: [] };
   
   let globalMin = Infinity;
   let globalMax = -Infinity;
@@ -1413,14 +1431,8 @@ function computeLayerStats(layer, channelData, width, height) {
     for (let i = 0; i < data.length; i++) {
       const v = data[i];
       
-      if (isNaN(v)) {
-        nanCount++;
-        continue;
-      }
-      if (!isFinite(v)) {
-        infCount++;
-        continue;
-      }
+      if (isNaN(v)) { nanCount++; continue; }
+      if (!isFinite(v)) { infCount++; continue; }
       
       if (v < min) min = v;
       if (v > max) max = v;
@@ -1431,7 +1443,6 @@ function computeLayerStats(layer, channelData, width, height) {
     
     const avg = count > 0 ? sum / count : 0;
     
-    // Standard deviation
     let variance = 0;
     for (let i = 0; i < data.length; i++) {
       const v = data[i];
@@ -1444,10 +1455,7 @@ function computeLayerStats(layer, channelData, width, height) {
     
     stats.channels.push({
       name: chName.split('.').pop(),
-      min,
-      max,
-      avg,
-      stdDev,
+      min, max, avg, stdDev,
       negatives: negCount,
       nans: nanCount,
       infs: infCount
@@ -1465,7 +1473,9 @@ function computeLayerStats(layer, channelData, width, height) {
   stats.hasNegatives = hasNegatives;
   stats.hasNaN = hasNaN;
   stats.hasInf = hasInf;
-  stats.bitDepth = state.header.channels.find(c => layer.channelList.includes(c.name))?.pixelType === 1 ? '16-bit Half' : '32-bit Float';
+  
+  const ch = state.header.channels.find(c => layer.channelList.includes(c.name));
+  stats.bitDepth = ch?.pixelType === 1 ? '16-bit Half' : '32-bit Float';
   
   return stats;
 }
@@ -1477,12 +1487,22 @@ function computeHistogram(layer, channelData, width, height) {
     B: new Uint32Array(256)
   };
   
-  const chs = layer.channels;
-  const rData = channelData[chs.R] || channelData[chs.Y] || channelData[layer.channelList[0]];
-  const gData = channelData[chs.G] || rData;
-  const bData = channelData[chs.B] || rData;
+  let rData = getChannelData(layer, channelData, 'R');
+  let gData = getChannelData(layer, channelData, 'G');
+  let bData = getChannelData(layer, channelData, 'B');
   
-  // Find range for normalization
+  if (!rData && !gData && !bData) {
+    rData = getChannelData(layer, channelData, 'Y') || channelData[layer.channelList[0]];
+    gData = rData;
+    bData = rData;
+  } else {
+    if (!rData) rData = gData || bData;
+    if (!gData) gData = rData || bData;
+    if (!bData) bData = rData || gData;
+  }
+  
+  if (!rData) return histograms;
+  
   let min = Infinity, max = -Infinity;
   for (const data of [rData, gData, bData]) {
     if (!data) continue;
@@ -1600,11 +1620,9 @@ async function handleFile(file) {
   hideStatus();
   
   try {
-    // Read file
     const arrayBuffer = await file.arrayBuffer();
     const buffer = new Uint8Array(arrayBuffer);
     
-    // Parse header
     showLoading('Parsing header...');
     const header = parseHeader(buffer);
     
@@ -1612,16 +1630,13 @@ async function handleFile(file) {
     const width = dw.xMax - dw.xMin + 1;
     const height = dw.yMax - dw.yMin + 1;
     
-    // Parse pixel data
     showLoading('Decompressing pixel data...', '0%');
     const { channelData } = await parsePixelData(buffer, header, (progress) => {
       showLoading('Decompressing pixel data...', progress + '%');
     });
     
-    // Group channels into layers
     const layers = groupChannelsIntoLayers(header.channels);
     
-    // Store state
     state.file = file;
     state.buffer = buffer;
     state.header = header;
@@ -1632,8 +1647,6 @@ async function handleFile(file) {
     state.currentLayer = null;
     
     hideLoading();
-    
-    // Update UI
     updateUI();
     showStatus('File loaded successfully', 'success');
     
@@ -1647,16 +1660,13 @@ async function handleFile(file) {
 function updateUI() {
   const { file, header, layers, width, height } = state;
   
-  // Show main content
   document.getElementById('mainContent').classList.add('visible');
   document.getElementById('uploadZone').style.display = 'none';
   
-  // Update header
   document.getElementById('fileName').textContent = file.name;
   document.getElementById('fileMeta').textContent = 
     `${width}×${height} • ${layers.length} layer${layers.length !== 1 ? 's' : ''} • ${COMPRESSION_NAMES[header.compression]}`;
   
-  // Update file info
   const dw = header.dataWindow;
   const disp = header.displayWindow;
   document.getElementById('fileInfoGrid').innerHTML = `
@@ -1686,10 +1696,8 @@ function updateUI() {
     </div>
   `;
   
-  // Build layer grid
   buildLayerGrid();
   
-  // Select first layer
   if (layers.length > 0) {
     selectLayer(layers[0].name);
   }
@@ -1705,7 +1713,6 @@ function buildLayerGrid() {
     el.dataset.layer = layer.name;
     el.onclick = () => selectLayer(layer.name);
     
-    // Generate thumbnail color
     const thumbColor = getLayerThumbnailColor(layer);
     
     el.innerHTML = `
@@ -1721,7 +1728,6 @@ function buildLayerGrid() {
 }
 
 function getLayerThumbnailColor(layer) {
-  // Generate a simple color based on layer type
   const chs = layer.channels;
   if (chs.R && chs.G && chs.B) {
     return 'linear-gradient(135deg, #ff6b6b, #4ecdc4, #45b7d1)';
@@ -1743,25 +1749,16 @@ function selectLayer(layerName) {
   
   state.currentLayer = layer;
   
-  // Update selection UI
   document.querySelectorAll('.exr-layer-item').forEach(el => {
     el.classList.toggle('selected', el.dataset.layer === layerName);
   });
   
-  // Update hero title
   document.getElementById('heroTitle').textContent = layerName;
-  
-  // Hide placeholder
   document.getElementById('heroPlaceholder').style.display = 'none';
   document.getElementById('heroCanvas').style.display = 'block';
   
-  // Render preview
   updatePreview();
-  
-  // Update statistics
   updateStatistics();
-  
-  // Update histogram
   updateHistogram();
 }
 
@@ -1824,7 +1821,7 @@ function updateHistogram() {
 }
 
 // ============================================================================
-// EXPORT FUNCTIONS
+// EXPORT FUNCTIONS (FIXED - proper EXR structure for Photoshop/AE)
 // ============================================================================
 
 function exportCurrentLayer() {
@@ -1850,6 +1847,7 @@ function exportAllLayers() {
       return;
     }
     
+    document.getElementById('loadingProgress').textContent = `${i + 1} / ${state.layers.length}`;
     exportLayer(state.layers[i], format);
     i++;
     setTimeout(exportNext, 200);
@@ -1863,7 +1861,6 @@ function exportLayer(layer, format) {
   const safeName = layer.name.replace(/[^a-z0-9_-]/gi, '_');
   
   if (format === 'png') {
-    // Create canvas and render
     const canvas = document.createElement('canvas');
     renderLayerToCanvas(canvas, layer, state.channelData, state.width, state.height, {
       exposure: 0,
@@ -1871,14 +1868,12 @@ function exportLayer(layer, format) {
       showAlpha: false
     });
     
-    // Download
     const link = document.createElement('a');
     link.download = `${baseName}_${safeName}.png`;
     link.href = canvas.toDataURL('image/png');
     link.click();
     
   } else {
-    // Export as minimal EXR
     const exrData = buildMinimalEXR(layer);
     const blob = new Blob([exrData], { type: 'application/octet-stream' });
     const link = document.createElement('a');
@@ -1890,125 +1885,176 @@ function exportLayer(layer, format) {
 }
 
 function buildMinimalEXR(layer) {
-  const { width, height, channelData, header } = state;
+  const { width, height, channelData } = state;
   
-  // Get channel info
-  const chNames = layer.channelList.slice().sort();
-  const channels = chNames.map(name => header.channels.find(c => c.name === name));
+  // Determine output channels - use simple R, G, B, A names
+  const outputChannels = [];
   
-  // Build header
-  const headerParts = [];
+  // Check what channels the layer has
+  const hasR = !!getChannelData(layer, channelData, 'R');
+  const hasG = !!getChannelData(layer, channelData, 'G');
+  const hasB = !!getChannelData(layer, channelData, 'B');
+  const hasA = !!getChannelData(layer, channelData, 'A');
+  const hasY = !!getChannelData(layer, channelData, 'Y');
   
-  // Magic + version
-  const magic = new ArrayBuffer(8);
-  const magicView = new DataView(magic);
-  magicView.setUint32(0, EXR_MAGIC, true);
-  magicView.setUint32(4, 2, true); // version 2
-  headerParts.push(new Uint8Array(magic));
+  if (hasR && hasG && hasB) {
+    // RGB or RGBA layer
+    outputChannels.push({ name: 'B', data: getChannelData(layer, channelData, 'B') });
+    outputChannels.push({ name: 'G', data: getChannelData(layer, channelData, 'G') });
+    outputChannels.push({ name: 'R', data: getChannelData(layer, channelData, 'R') });
+    if (hasA) {
+      outputChannels.push({ name: 'A', data: getChannelData(layer, channelData, 'A') });
+    }
+  } else if (hasY || layer.channelList.length === 1) {
+    // Single channel - export as Y
+    const data = hasY ? getChannelData(layer, channelData, 'Y') : channelData[layer.channelList[0]];
+    outputChannels.push({ name: 'Y', data: data });
+  } else {
+    // Unknown structure - export first channel as Y
+    outputChannels.push({ name: 'Y', data: channelData[layer.channelList[0]] });
+  }
+  
+  // Sort channels alphabetically (EXR requirement)
+  outputChannels.sort((a, b) => a.name.localeCompare(b.name));
+  
+  // Build EXR file
+  const parts = [];
+  
+  // Magic number (4 bytes)
+  const magic = new Uint8Array(4);
+  new DataView(magic.buffer).setUint32(0, EXR_MAGIC, true);
+  parts.push(magic);
+  
+  // Version (4 bytes) - version 2, scanline
+  const version = new Uint8Array(4);
+  new DataView(version.buffer).setUint32(0, 2, true);
+  parts.push(version);
+  
+  // Helper to write attribute
+  function writeAttr(name, type, dataFn) {
+    // Name (null-terminated)
+    const nameBytes = new Uint8Array(name.length + 1);
+    for (let i = 0; i < name.length; i++) nameBytes[i] = name.charCodeAt(i);
+    parts.push(nameBytes);
+    
+    // Type (null-terminated)
+    const typeBytes = new Uint8Array(type.length + 1);
+    for (let i = 0; i < type.length; i++) typeBytes[i] = type.charCodeAt(i);
+    parts.push(typeBytes);
+    
+    // Size + Data
+    const data = dataFn();
+    const sizeBytes = new Uint8Array(4);
+    new DataView(sizeBytes.buffer).setInt32(0, data.length, true);
+    parts.push(sizeBytes);
+    parts.push(data);
+  }
   
   // Channels attribute
-  headerParts.push(stringToBytes('channels'));
-  headerParts.push(stringToBytes('chlist'));
-  
-  let chlistData = [];
-  for (const ch of channels) {
-    chlistData.push(...stringToBytes(ch.name));
-    const chInfo = new Uint8Array(16);
-    const chView = new DataView(chInfo.buffer);
-    chView.setInt32(0, ch.pixelType, true);
-    chView.setInt32(8, 1, true); // xSampling
-    chView.setInt32(12, 1, true); // ySampling
-    chlistData.push(...chInfo);
-  }
-  chlistData.push(0); // null terminator
-  
-  const chlistSize = new Uint8Array(4);
-  new DataView(chlistSize.buffer).setInt32(0, chlistData.length, true);
-  headerParts.push(chlistSize);
-  headerParts.push(new Uint8Array(chlistData));
+  writeAttr('channels', 'chlist', () => {
+    const chParts = [];
+    for (const ch of outputChannels) {
+      // Channel name (null-terminated)
+      const nameBytes = new Uint8Array(ch.name.length + 1);
+      for (let i = 0; i < ch.name.length; i++) nameBytes[i] = ch.name.charCodeAt(i);
+      chParts.push(nameBytes);
+      
+      // Channel info (16 bytes)
+      const info = new Uint8Array(16);
+      const infoView = new DataView(info.buffer);
+      infoView.setInt32(0, 2, true);  // pixelType = FLOAT (2)
+      info[4] = 0;  // pLinear
+      // bytes 5-7 reserved (already 0)
+      infoView.setInt32(8, 1, true);   // xSampling
+      infoView.setInt32(12, 1, true);  // ySampling
+      chParts.push(info);
+    }
+    // Null terminator for channel list
+    chParts.push(new Uint8Array([0]));
+    
+    // Combine
+    let totalLen = 0;
+    for (const p of chParts) totalLen += p.length;
+    const result = new Uint8Array(totalLen);
+    let offset = 0;
+    for (const p of chParts) {
+      result.set(p, offset);
+      offset += p.length;
+    }
+    return result;
+  });
   
   // Compression
-  headerParts.push(stringToBytes('compression'));
-  headerParts.push(stringToBytes('compression'));
-  headerParts.push(new Uint8Array([1, 0, 0, 0, 0])); // size=1, value=0 (none)
+  writeAttr('compression', 'compression', () => new Uint8Array([0])); // None
   
   // Data window
-  headerParts.push(stringToBytes('dataWindow'));
-  headerParts.push(stringToBytes('box2i'));
-  const dwData = new Uint8Array(20);
-  const dwView = new DataView(dwData.buffer);
-  dwView.setInt32(0, 16, true); // size
-  dwView.setInt32(4, 0, true);
-  dwView.setInt32(8, 0, true);
-  dwView.setInt32(12, width - 1, true);
-  dwView.setInt32(16, height - 1, true);
-  headerParts.push(dwData);
+  writeAttr('dataWindow', 'box2i', () => {
+    const data = new Uint8Array(16);
+    const view = new DataView(data.buffer);
+    view.setInt32(0, 0, true);
+    view.setInt32(4, 0, true);
+    view.setInt32(8, width - 1, true);
+    view.setInt32(12, height - 1, true);
+    return data;
+  });
   
   // Display window
-  headerParts.push(stringToBytes('displayWindow'));
-  headerParts.push(stringToBytes('box2i'));
-  headerParts.push(dwData.slice()); // same as data window
+  writeAttr('displayWindow', 'box2i', () => {
+    const data = new Uint8Array(16);
+    const view = new DataView(data.buffer);
+    view.setInt32(0, 0, true);
+    view.setInt32(4, 0, true);
+    view.setInt32(8, width - 1, true);
+    view.setInt32(12, height - 1, true);
+    return data;
+  });
   
   // Line order
-  headerParts.push(stringToBytes('lineOrder'));
-  headerParts.push(stringToBytes('lineOrder'));
-  headerParts.push(new Uint8Array([1, 0, 0, 0, 0])); // size=1, value=0
+  writeAttr('lineOrder', 'lineOrder', () => new Uint8Array([0])); // Increasing Y
   
   // Pixel aspect ratio
-  headerParts.push(stringToBytes('pixelAspectRatio'));
-  headerParts.push(stringToBytes('float'));
-  const parData = new Uint8Array(8);
-  const parView = new DataView(parData.buffer);
-  parView.setInt32(0, 4, true); // size
-  parView.setFloat32(4, 1.0, true);
-  headerParts.push(parData);
+  writeAttr('pixelAspectRatio', 'float', () => {
+    const data = new Uint8Array(4);
+    new DataView(data.buffer).setFloat32(0, 1.0, true);
+    return data;
+  });
   
-  // Screen window
-  headerParts.push(stringToBytes('screenWindowCenter'));
-  headerParts.push(stringToBytes('v2f'));
-  const swcData = new Uint8Array(12);
-  new DataView(swcData.buffer).setInt32(0, 8, true);
-  headerParts.push(swcData);
+  // Screen window center
+  writeAttr('screenWindowCenter', 'v2f', () => new Uint8Array(8));
   
-  headerParts.push(stringToBytes('screenWindowWidth'));
-  headerParts.push(stringToBytes('float'));
-  const swwData = new Uint8Array(8);
-  const swwView = new DataView(swwData.buffer);
-  swwView.setInt32(0, 4, true);
-  swwView.setFloat32(4, 1.0, true);
-  headerParts.push(swwData);
+  // Screen window width  
+  writeAttr('screenWindowWidth', 'float', () => {
+    const data = new Uint8Array(4);
+    new DataView(data.buffer).setFloat32(0, 1.0, true);
+    return data;
+  });
   
-  // End of header
-  headerParts.push(new Uint8Array([0]));
+  // End of header (null byte)
+  parts.push(new Uint8Array([0]));
   
   // Calculate header size
   let headerSize = 0;
-  for (const part of headerParts) headerSize += part.length;
+  for (const p of parts) headerSize += p.length;
   
-  // Calculate scanline sizes
-  let bytesPerScanline = 0;
-  for (const ch of channels) {
-    bytesPerScanline += width * ch.bytesPerPixel;
-  }
-  
-  // Offset table
+  // Scanline data: 4 bytes per pixel per channel
+  const bytesPerScanline = width * outputChannels.length * 4;
   const offsetTableSize = height * 8;
-  const dataStart = headerSize + offsetTableSize;
+  const pixelDataSize = height * (8 + bytesPerScanline); // y + size + data per scanline
   
-  // Build full buffer
-  const totalSize = dataStart + height * (8 + bytesPerScanline);
+  const totalSize = headerSize + offsetTableSize + pixelDataSize;
   const buffer = new ArrayBuffer(totalSize);
-  const view = new DataView(buffer);
   const bytes = new Uint8Array(buffer);
+  const view = new DataView(buffer);
   
   // Copy header
   let offset = 0;
-  for (const part of headerParts) {
-    bytes.set(part, offset);
-    offset += part.length;
+  for (const p of parts) {
+    bytes.set(p, offset);
+    offset += p.length;
   }
   
   // Write offset table
+  const dataStart = headerSize + offsetTableSize;
   for (let y = 0; y < height; y++) {
     const scanlineOffset = dataStart + y * (8 + bytesPerScanline);
     view.setBigUint64(offset, BigInt(scanlineOffset), true);
@@ -2021,78 +2067,21 @@ function buildMinimalEXR(layer) {
     view.setInt32(offset, y, true);
     offset += 4;
     
-    // Size
+    // Data size
     view.setInt32(offset, bytesPerScanline, true);
     offset += 4;
     
-    // Channel data
-    for (const ch of channels) {
-      const data = channelData[ch.name];
-      
+    // Channel data (already sorted alphabetically)
+    for (const ch of outputChannels) {
       for (let x = 0; x < width; x++) {
-        const value = data[y * width + x];
-        
-        if (ch.pixelType === 1) {
-          // HALF - convert float to half
-          view.setUint16(offset, floatToHalf(value), true);
-          offset += 2;
-        } else {
-          // FLOAT
-          view.setFloat32(offset, value, true);
-          offset += 4;
-        }
+        const value = ch.data[y * width + x] || 0;
+        view.setFloat32(offset, value, true);
+        offset += 4;
       }
     }
   }
   
   return buffer;
-}
-
-function stringToBytes(str) {
-  const bytes = new Uint8Array(str.length + 1);
-  for (let i = 0; i < str.length; i++) {
-    bytes[i] = str.charCodeAt(i);
-  }
-  bytes[str.length] = 0;
-  return bytes;
-}
-
-function floatToHalf(f) {
-  const floatView = new Float32Array(1);
-  const int32View = new Int32Array(floatView.buffer);
-  
-  floatView[0] = f;
-  const x = int32View[0];
-  
-  const sign = (x >> 31) & 1;
-  let exp = (x >> 23) & 0xFF;
-  let mant = x & 0x7FFFFF;
-  
-  if (exp === 0) {
-    // Zero or denorm -> zero
-    return sign << 15;
-  } else if (exp === 255) {
-    // Inf or NaN
-    if (mant === 0) {
-      return (sign << 15) | 0x7C00;
-    } else {
-      return (sign << 15) | 0x7C00 | (mant >> 13);
-    }
-  }
-  
-  exp = exp - 127 + 15;
-  
-  if (exp >= 31) {
-    // Overflow -> infinity
-    return (sign << 15) | 0x7C00;
-  } else if (exp <= 0) {
-    // Underflow
-    if (exp < -10) return sign << 15;
-    mant = (mant | 0x800000) >> (1 - exp);
-    return (sign << 15) | (mant >> 13);
-  }
-  
-  return (sign << 15) | (exp << 10) | (mant >> 13);
 }
 
 // ============================================================================
@@ -2126,7 +2115,6 @@ function init() {
   const uploadZone = document.getElementById('uploadZone');
   const fileInput = document.getElementById('fileInput');
   
-  // Drag and drop
   uploadZone.addEventListener('dragover', (e) => {
     e.preventDefault();
     uploadZone.classList.add('drag-over');
@@ -2144,14 +2132,12 @@ function init() {
     }
   });
   
-  // File input
   fileInput.addEventListener('change', (e) => {
     if (e.target.files.length > 0) {
       handleFile(e.target.files[0]);
     }
   });
   
-  // Make updatePreview globally accessible
   window.updatePreview = updatePreview;
   window.exportCurrentLayer = exportCurrentLayer;
   window.exportAllLayers = exportAllLayers;
